@@ -51,7 +51,6 @@ bot/
 ├── web_service.py      # Веб-сервис: ввод ключа → получение конфига, короткие ссылки
 ├── miniapp.py          # Telegram Mini App (Flask)
 ├── security.py         # Защита Flask-приложений от сканеров и ботов
-├── obfuscator.py       # Вспомогательные утилиты обфускации
 ├── start.sh            # Скрипт запуска через screen
 ├── stop.sh             # Скрипт остановки screen-сессий
 ├── requirements.txt
