@@ -1,6 +1,6 @@
 # AmneziaVPN Telegram Bot
 
-Telegram-бот для управления VPN-профилями AmneziaVPN с поддержкой мультипрофилей, секретных ключей, короткиих ссылок, веб-сервиса и Telegram Mini App.
+Telegram-бот для управления VPN-профилями AmneziaVPN с поддержкой мультипрофилей, секретных ключей, короткиих ссылок, веб-сервиса и Telegram Mini App на основе AmneziaApi
 
 ## Возможности
 
