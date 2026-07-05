@@ -257,14 +257,14 @@ def kb_main(admin: bool = False) -> InlineKeyboardMarkup:
     rows.append([
         InlineKeyboardButton(
             text="🚀 Открыть меню",
-            web_app=WebAppInfo(url="https://pgkqawg.p1zda.ru/"),
+            web_app=WebAppInfo(url="https://just1kbot.1337.cx/"),
         ),
     ])
 
     rows.append([
         InlineKeyboardButton(
             text="🟢 Telegram без VPN",
-            url="tg://proxy?server=tg.p1zda.ru&port=7443&secret=ee6728938c788a91f18307dd069c96e91b6170692e6f7a6f6e2e7275",
+            url="https://t.me/proxy?server=justik.1337.cx&port=8443&secret=ee756a5c6202570ef20c9ecae8c09809ca7777772e636c6f7564666c6172652e636f6d",
         ),
     ])
 
