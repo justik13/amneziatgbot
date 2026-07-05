@@ -548,8 +548,8 @@ __SHARED_CSS__
 <body>
 <div class="wrap">
   <div class="header">
-    <div class="logo">🤮</div>
-    <h1>FQof</h1>
+    <div class="logo">😎</div>
+    <h1>just1kbot</h1>
     <p>Введите ключ для получения конфигурации</p>
   </div>
 
