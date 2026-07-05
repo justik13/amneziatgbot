@@ -341,7 +341,7 @@ def api_config(profile_id: int):
         return jsonify({"error": "Конфиг недоступен. Обратитесь к администратору."}), 404
 
     slug = _get_or_create_slug(db, profile_id)
-    domain = getattr(settings, "SHORT_LINK_DOMAIN", "fqof.ru").rstrip("/")
+    domain = getattr(settings, "SHORT_LINK_DOMAIN", "just1kbot.1337.cx").rstrip("/")
     short_url = f"https://{domain}/c/{slug}"
 
     return jsonify({
@@ -439,7 +439,7 @@ def api_mykey():
         return jsonify({"error": "Создание ключей заблокировано администратором"}), 403
 
     existing = run_async(db.get_secret_key_by_user(uid))
-    domain   = getattr(settings, "SHORT_LINK_DOMAIN", "fqof.ru").rstrip("/")
+    domain   = getattr(settings, "SHORT_LINK_DOMAIN", "just1kbot.1337.cx").rstrip("/")
 
     if existing and not existing.get("revoked"):
         return jsonify({
@@ -465,7 +465,7 @@ def api_mykey():
 def api_newkey():
     uid    = g.tg_user["id"]
     db     = get_db()
-    domain = getattr(settings, "SHORT_LINK_DOMAIN", "fqof.ru").rstrip("/")
+    domain = getattr(settings, "SHORT_LINK_DOMAIN", "just1kbot.1337.cx").rstrip("/")
 
     if run_async(db.get_user_key_blocked(uid)):
         return jsonify({"error": "Создание ключей заблокировано администратором"}), 403
@@ -962,7 +962,7 @@ MINIAPP_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>FQof VPN</title>
+<title>just1kbot</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script>
   (function() {
@@ -984,8 +984,8 @@ __MINIAPP_CSS__
   <header class="app-header">
     <div class="header-top">
       <div class="logo">
-        <span class="logo-emoji">🤮</span>
-        <span class="logo-name">FQof VPN</span>
+        <span class="logo-emoji">😎</span>
+        <span class="logo-name">just1kbot</span>
       </div>
       <div class="user-chip">
         <div class="chip-dot" id="chip-dot"></div>
@@ -1061,7 +1061,7 @@ __MINIAPP_CSS__
         <a class="dl-link" href="https://play.google.com/store/apps/details?id=org.amnezia.vpn" target="_blank" rel="noopener noreferrer">
           <div class="dl-left"><span>🤖</span> Android — Google Play</div><span class="dl-arrow">↗</span>
         </a>
-        <a class="dl-link" href="https://github.com/amnezia-vpn/amnezia-client/releases/download/4.8.14.5/AmneziaVPN_4.8.14.5_x64.exe" target="_blank" rel="noopener noreferrer">
+        <a class="dl-link" href="https://github.com/amnezia-vpn/amnezia-client/releases/latest" target="_blank" rel="noopener noreferrer">
           <div class="dl-left"><span>🖥</span> Windows — GitHub</div><span class="dl-arrow">↗</span>
         </a>
       </div>
