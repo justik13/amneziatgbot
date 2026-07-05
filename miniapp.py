@@ -101,7 +101,7 @@ def validate_telegram_init_data(init_data: str) -> dict | None:
             return None
 
         auth_date = int(parsed.get("auth_date", 0))
-        if time.time() - auth_date > 3600:
+        if time.time() - auth_date > 86400:
             logger.warning("Отклонено: устаревший auth_date (%d сек)", int(time.time()) - auth_date)
             return None
 

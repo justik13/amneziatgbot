@@ -287,7 +287,7 @@ def check_scanner(app, home_url: str = "/"):
             abort(429)
 
         reason = _classify_request()
-        if reason:
+        if reason and not request.path.startswith("/api"):
             if _is_scan_threshold(ip):
                 _block_ip(ip, reason)
                 abort(403)
@@ -295,7 +295,7 @@ def check_scanner(app, home_url: str = "/"):
 
     @app.errorhandler(400)
     def _bad_request(_e):
-        return "", 400
+        return {"error": "WAF Block", "message": "Request blocked by security"}, 400
 
     @app.errorhandler(404)
     def _not_found(_e):
