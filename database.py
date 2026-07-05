@@ -68,6 +68,8 @@ class Database:
                 telegram_id INTEGER PRIMARY KEY,
                 banned      INTEGER NOT NULL DEFAULT 0,
                 key_blocked INTEGER NOT NULL DEFAULT 0,
+                is_premium  BOOLEAN DEFAULT 0,
+                subscription_ends_at INTEGER DEFAULT NULL,
                 created_at  TEXT DEFAULT (datetime('now', 'localtime'))
             )
         """)
@@ -123,6 +125,8 @@ class Database:
 
     async def _auto_migrate_schema(self):
         await self._add_column_if_missing("users", "key_blocked", "INTEGER NOT NULL DEFAULT 0")
+        await self._add_column_if_missing("users", "is_premium", "BOOLEAN DEFAULT 0")
+        await self._add_column_if_missing("users", "subscription_ends_at", "INTEGER DEFAULT NULL")
         await self._add_column_if_missing("vpn_profiles", "disabled", "INTEGER NOT NULL DEFAULT 0")
         await self._add_column_if_missing("vpn_profiles", "last_ip", "TEXT")
         await self._add_column_if_missing("vpn_profiles", "raw_response", "TEXT")
@@ -415,6 +419,68 @@ class Database:
             if not row: return False
             keys = row.keys() if hasattr(row, "keys") else []
             return bool(row["key_blocked"]) if "key_blocked" in keys else False
+
+    async def set_user_premium(self, telegram_id: int, duration_days: int) -> None:
+        import time
+        current_timestamp = int(time.time())
+        
+        # Получаем текущее время окончания подписки
+        async with self._conn.execute(
+            "SELECT subscription_ends_at FROM users WHERE telegram_id=?", (telegram_id,)
+        ) as cur:
+            row = await cur.fetchone()
+            old_end_time = row["subscription_ends_at"] if row else None
+        
+        # Если у пользователя уже есть активная подписка, добавляем к ней новые дни
+        if old_end_time and old_end_time > current_timestamp:
+            new_end_time = old_end_time + duration_days * 24 * 3600
+        else:
+            new_end_time = current_timestamp + duration_days * 24 * 3600
+            
+        await self._conn.execute(
+            "UPDATE users SET is_premium=1, subscription_ends_at=? WHERE telegram_id=?",
+            (new_end_time, telegram_id)
+        )
+        await self._conn.commit()
+
+    async def check_user_premium_status(self, telegram_id: int) -> dict:
+        import time
+        current_timestamp = int(time.time())
+        
+        async with self._conn.execute(
+            "SELECT is_premium, subscription_ends_at FROM users WHERE telegram_id=?", (telegram_id,)
+        ) as cur:
+            row = await cur.fetchone()
+            
+        if not row:
+            return {"is_premium": False, "subscription_ends_at": None, "days_remaining": 0}
+            
+        is_premium = bool(row["is_premium"])
+        end_time = row["subscription_ends_at"]
+        
+        if not is_premium or not end_time:
+            days_remaining = 0
+        else:
+            seconds_remaining = max(0, end_time - current_timestamp)
+            days_remaining = seconds_remaining // (24 * 3600)
+            
+        return {
+            "is_premium": is_premium,
+            "subscription_ends_at": end_time,
+            "days_remaining": days_remaining
+        }
+
+    async def get_expired_premium_users(self) -> list:
+        import time
+        current_timestamp = int(time.time())
+        
+        async with self._conn.execute(
+            "SELECT telegram_id FROM users WHERE is_premium=1 AND subscription_ends_at < ?",
+            (current_timestamp,)
+        ) as cur:
+            rows = await cur.fetchall()
+            
+        return [row["telegram_id"] for row in rows]
 
     async def _cleanup_expired_short_links(self):
         try:
