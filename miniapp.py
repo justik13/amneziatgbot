@@ -193,6 +193,20 @@ def fmt_bytes(b: float) -> str:
         b /= 1024
     return f"{b:.1f} ТБ"
 
+def fmt_time(ts: int) -> str:
+    if not ts:
+        return "никогда"
+    delta = int(time.time()) - ts
+    if delta < 0:
+        return "только что"
+    if delta < 60:
+        return f"{delta} сек. назад"
+    if delta < 3600:
+        return f"{delta // 60} мин. назад"
+    if delta < 86400:
+        return f"{delta // 3600} ч. назад"
+    return f"{delta // 86400} д. назад"
+
 def find_peer(clients_data: dict | None, vpn_name: str) -> dict | None:
     if not clients_data: return None
     for item in clients_data.get("items", []):
@@ -243,34 +257,38 @@ def profile_to_json(profile: dict, peer: dict | None = None) -> dict:
 @require_auth
 @rate_limit(limit=30, window=60)
 def api_me():
-    uid = g.tg_user["id"]
-    db = get_db()
-    amnezia = get_amnezia()
+    try:
+        uid = g.tg_user["id"]
+        db = get_db()
+        amnezia = get_amnezia()
 
-    is_admin = uid in settings.ADMIN_IDS
-    max_profiles = None if is_admin else settings.MAX_PROFILES_PER_USER
+        is_admin = uid in settings.ADMIN_IDS
+        max_profiles = None if is_admin else settings.MAX_PROFILES_PER_USER
 
-    subscription = _subscription_payload(db, uid)
-    profiles = run_async(db.get_profiles(uid))
-    can_create = True if is_admin else (subscription["is_premium"] and run_async(db.can_create_profile(uid, settings.MAX_PROFILES_PER_USER)))
-    clients = run_async(amnezia.get_all_clients())
+        subscription = _subscription_payload(db, uid)
+        profiles = run_async(db.get_profiles(uid))
+        can_create = True if is_admin else (subscription["is_premium"] and run_async(db.can_create_profile(uid, settings.MAX_PROFILES_PER_USER)))
+        clients = run_async(amnezia.get_all_clients())
 
-    result = []
-    for p in profiles:
-        peer = find_peer(clients, p["vpn_name"])
-        result.append(profile_to_json(p, peer))
+        result = []
+        for p in profiles:
+            peer = find_peer(clients, p["vpn_name"])
+            result.append(profile_to_json(p, peer))
 
-    return jsonify({
-        "profiles": result,
-        "can_create": can_create,
-        "max_profiles": max_profiles,
-        "is_admin": is_admin,
-        "subscription": subscription,
-        "user": {
-            "id": uid,
-            "name": g.tg_user.get("first_name", ""),
-        },
-    })
+        return jsonify({
+            "profiles": result,
+            "can_create": can_create,
+            "max_profiles": max_profiles,
+            "is_admin": is_admin,
+            "subscription": subscription,
+            "user": {
+                "id": uid,
+                "name": g.tg_user.get("first_name", ""),
+            },
+        })
+    except Exception as e:
+        logger.error(f"Error in api_me: {e}")
+        return jsonify({"error": "Internal Server Error"}), 500
 
 
 @app.route("/api/create", methods=["POST"])
