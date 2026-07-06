@@ -10,7 +10,7 @@ import threading
 import traceback
 import time
 from collections import defaultdict
-from flask import Flask, request, jsonify, render_template_string, make_response
+from flask import Flask, request, jsonify, render_template_string, make_response, redirect
 from config import settings
 from database import Database
 from amnezia_client import AmneziaClient
