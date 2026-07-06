@@ -16,7 +16,7 @@ from aiogram.types import (
     InlineKeyboardButton,
     ReplyKeyboardMarkup,
     KeyboardButton,
-    WebAppInfo,
+    # WebAppInfo,  # Убедитесь, что этот импорт уже есть
 )
 
 from config import settings
