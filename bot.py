@@ -650,6 +650,7 @@ async def cb_my_info_profile(callback: CallbackQuery, db: Database, amnezia: Amn
         [InlineKeyboardButton(text="🔙 В главное меню", callback_data="back_main")],
     ])
 
+    user_data = await db.get_user(callback.from_user.id)
     web_login = user_data.get("web_login", "")
     login_info = (
         f"Личный кабинет туннеля (резервный вход): Логин: {html.escape(web_login)}"
@@ -842,6 +843,7 @@ async def main():
     dp.callback_query.register(cb_user_del_profile_do, F.data.startswith("user_del_profile_do:"))
     dp.callback_query.register(cb_buy_subscription,   F.data == "buy_subscription")
     dp.callback_query.register(cb_buy_tariff,         F.data.startswith("buy_tariff:"))
+    dp.callback_query.register(cb_server_status,       F.data == "server_status")
     dp.callback_query.register(cb_server_status,       F.data == "server_status")
 
     async def on_startup():
