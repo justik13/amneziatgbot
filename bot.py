@@ -239,73 +239,8 @@ async def cmd_panel(message: Message, state: FSMContext, db: Database):
     await state.update_data(menu_msg_id=sent.message_id)
 
 
-async def cmd_mykey(message: Message, db: Database):
-    uid = message.from_user.id if message.from_user else None
-    if uid is None or not is_allowed(uid):
-        return
-
-    asyncio.create_task(_schedule_delete(message.bot, message.chat.id, message.message_id))
-
-    blocked = await db.get_user_key_blocked(uid)
-    if blocked:
-        await message.answer(
-            "🚫 Создание ключей для вашего аккаунта заблокировано администратором.",
-            parse_mode="HTML",
-        )
-        return
-
-    existing = await db.get_secret_key_by_user(uid)
-    if existing and not existing.get("revoked"):
-        key_val = existing["key_value"]
-        used = existing.get("used")
-        status = "✅ Использован" if used else "⏳ Ожидает использования"
-        domain = settings.SHORT_LINK_DOMAIN.rstrip("/") if hasattr(settings, "SHORT_LINK_DOMAIN") else "dqpq.ru"
-        await message.answer(
-            f"🔑 <b>Ваш секретный ключ</b>\n\n"
-            f"<code>{html.escape(key_val)}</code>\n\n"
-            f"Статус: {status}\n\n"
-            f"Используйте этот ключ на сайте <b>https://{html.escape(domain)}</b> "
-            f"для создания VPN-профиля без Telegram.\n\n"
-            f"⚠️ Один ключ — один профиль. Для нового ключа — /newkey",
-            parse_mode="HTML",
-        )
-        return
-
-    key_val = generate_secret_key()
-    await db.create_secret_key(uid, key_val)
-    domain = settings.SHORT_LINK_DOMAIN.rstrip("/") if hasattr(settings, "SHORT_LINK_DOMAIN") else "dqpq.ru"
-    await message.answer(
-        f"🔑 <b>Ваш секретный ключ создан</b>\n\n"
-        f"<code>{html.escape(key_val)}</code>\n\n"
-        f"Перейдите на <b>https://{html.escape(domain)}</b>, введите этот ключ "
-        f"и имя профиля для получения конфигурации VPN.\n\n"
-        f"⚠️ Ключ одноразовый. Не передавайте его другим людям.",
-        parse_mode="HTML",
-    )
 
 
-async def cmd_newkey(message: Message, db: Database):
-    uid = message.from_user.id if message.from_user else None
-    if uid is None or not is_allowed(uid):
-        return
-
-    asyncio.create_task(_schedule_delete(message.bot, message.chat.id, message.message_id))
-
-    blocked = await db.get_user_key_blocked(uid)
-    if blocked:
-        await message.answer("🚫 Создание ключей заблокировано администратором.", parse_mode="HTML")
-        return
-
-    key_val = generate_secret_key()
-    await db.create_secret_key(uid, key_val)
-    domain = settings.SHORT_LINK_DOMAIN.rstrip("/") if hasattr(settings, "SHORT_LINK_DOMAIN") else "dqpq.ru"
-    await message.answer(
-        f"🔑 <b>Новый секретный ключ создан</b>\n\n"
-        f"<code>{html.escape(key_val)}</code>\n\n"
-        f"Старый ключ аннулирован. Используйте новый на сайте "
-        f"<b>https://{html.escape(domain)}</b>",
-        parse_mode="HTML",
-    )
 
 
 async def catch_all_messages(message: Message):
@@ -836,8 +771,6 @@ async def main():
 
     dp.message.register(cmd_start,  CommandStart())
     dp.message.register(cmd_menu,   Command("menu"))
-    dp.message.register(cmd_mykey,  Command("mykey"))
-    dp.message.register(cmd_newkey, Command("newkey"))
 
     dp.message.register(cmd_start,  F.text == "🏠 Главное меню")
     dp.message.register(cmd_panel,  F.text == "🔧 Панель управления")
