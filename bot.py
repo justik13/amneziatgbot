@@ -288,6 +288,11 @@ async def cb_noop(callback: CallbackQuery):
 
 async def cb_create_vpn(callback: CallbackQuery, state: FSMContext, db: Database):
     uid = callback.from_user.id
+    premium_status = await db.check_user_premium_status(uid)
+    if not premium_status["is_premium"]:
+        await callback.answer("Для управления туннелями необходимо приобрести или продлить подписку.", show_alert=True)
+        return
+
     if not is_allowed(uid):
         await callback.answer("⛔ Доступ запрещён.", show_alert=True)
         return
@@ -439,6 +444,11 @@ async def cb_confirm_create(callback: CallbackQuery, state: FSMContext,
 
 async def cb_get_config(callback: CallbackQuery, state: FSMContext, db: Database):
     uid = callback.from_user.id
+    premium_status = await db.check_user_premium_status(uid)
+    if not premium_status["is_premium"]:
+        await callback.answer("Для управления туннелями необходимо приобрести или продлить подписку.", show_alert=True)
+        return
+
     profiles = await db.get_profiles(uid)
     if not profiles:
         await callback.answer("❌ У вас нет профилей.", show_alert=True)
@@ -545,6 +555,11 @@ async def _send_config_for_profile(callback: CallbackQuery, state: FSMContext,
 
 async def cb_my_profiles(callback: CallbackQuery, db: Database):
     uid = callback.from_user.id
+    premium_status = await db.check_user_premium_status(uid)
+    if not premium_status["is_premium"]:
+        await callback.answer("Для управления туннелями необходимо приобрести или продлить подписку.", show_alert=True)
+        return
+
     profiles = await db.get_profiles(uid)
     if not profiles:
         await callback.answer("❌ У вас нет профилей.", show_alert=True)
