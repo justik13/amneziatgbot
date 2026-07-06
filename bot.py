@@ -16,6 +16,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import (
     Message, CallbackQuery, TelegramObject,
     BufferedInputFile, BotCommand, BotCommandScopeDefault,
+    InlineKeyboardMarkup, InlineKeyboardButton,
 )
 
 from config import settings
@@ -730,6 +731,13 @@ async def cb_user_del_profile_do(callback: CallbackQuery, db: Database,
         reply_markup=kb_main(admin=admin),
     )
 
+
+def kb_tariff_selection():
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"Дней: {days} - Цена: {price} руб", callback_data=f"buy_tariff:{amount}")]
+        for days, price, amount in settings.TARIFF_GRID
+    ])
+    return kb
 
 async def cb_buy_subscription(callback: CallbackQuery, state: FSMContext):
     await safe_edit(
