@@ -731,36 +731,37 @@ async def cb_user_del_profile_do(callback: CallbackQuery, db: Database,
     )
 
 
-async def cb_server_status(callback: CallbackQuery, amnezia: AmneziaClient):
-    await safe_edit(callback.message, "⏳ Запрашиваю данные сервера…")
+async def cb_buy_subscription(callback: CallbackQuery, state: FSMContext):
+    await safe_edit(
+        callback.message,
+        "Выберите тариф для приобретения:",
+        reply_markup=kb_tariff_selection(),
+    )
     await callback.answer()
 
-    info = await amnezia.get_server_info()
-
-    if not info:
-        await safe_edit(
-            callback.message,
-            "❌ <b>Сервер недоступен</b>",
-            reply_markup=kb_server_status(),
-        )
+async def cb_buy_tariff(callback: CallbackQuery, db: Database):
+    uid = callback.from_user.id
+    amount_str = callback.data.split(":")[1]
+    if not amount_str.isdigit():
+        await callback.answer("❌ Некорректные данные.", show_alert=True)
         return
 
-    region = info.get("region") or info.get("serverRegion") or "—"
-    pr = info.get("protocols") or info.get("protocolsEnabled") or []
-    if isinstance(pr, str):
-        pr = [pr]
-    proto = ", ".join(pr) if pr else "—"
-    cnt = info.get("peersCount") or info.get("totalPeers") or info.get("clientsCount") or "—"
-    mx = info.get("maxPeers") or info.get("serverMaxPeers") or "—"
+    amount = int(amount_str)
+    payment_id = generate_secret_key()
+    await db.create_payment(uid, payment_id, 'PENDING', amount)
+
+    payment_url = f"https://platega.io/pay/{payment_id}"
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Оплатить", url=payment_url)],
+    ])
 
     await safe_edit(
         callback.message,
-        f"🖥 <b>Статус сервера</b>\n\n"
-        f"🌍 Регион: <code>{html.escape(str(region))}</code>\n"
-        f"🔌 Протоколы: <code>{html.escape(str(proto))}</code>\n"
-        f"👥 Клиентов: <b>{cnt}</b> / {mx}",
-        reply_markup=kb_server_status(),
+        f"Перейдите по ссылке для оплаты:\n\n"
+        f"<a href='{html.escape(payment_url)}'>{html.escape(payment_url)}</a>",
+        reply_markup=kb,
     )
+    await callback.answer()
 
 
 async def set_bot_commands(bot: Bot):
@@ -821,7 +822,8 @@ async def main():
     dp.callback_query.register(cb_my_info_profile,     F.data.startswith("my_info_profile:"))
     dp.callback_query.register(cb_user_del_profile,    F.data.startswith("user_del_profile:") & ~F.data.startswith("user_del_profile_do:"))
     dp.callback_query.register(cb_user_del_profile_do, F.data.startswith("user_del_profile_do:"))
-    dp.callback_query.register(cb_server_status,       F.data == "server_status")
+    dp.callback_query.register(cb_buy_subscription,   F.data == "buy_subscription")
+    dp.callback_query.register(cb_buy_tariff,         F.data.startswith("buy_tariff:"))
 
     async def on_startup():
         await set_bot_commands(bot)
