@@ -259,6 +259,10 @@ def kb_main(admin: bool = False) -> InlineKeyboardMarkup:
     ])
 
     rows.append([
+        InlineKeyboardButton(text="📱 Мои профили", callback_data="my_profiles"),
+    ])
+
+    rows.append([
         InlineKeyboardButton(
             text="🚀 Личный кабинет VPN",
             web_app=WebAppInfo(url=(getattr(settings, "MINIAPP_URL", "").strip() or "https://just1kbot.1337.cx/")),
