@@ -750,6 +750,37 @@ def kb_tariff_selection():
             inline_keyboard.append([InlineKeyboardButton(text=text, callback_data=f"buy_tariff:{amount}")])
     return InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
 
+async def cb_server_status(callback: CallbackQuery, amnezia: AmneziaClient):
+    await safe_edit(callback.message, "⏳ Запрашиваю данные сервера…")
+    await callback.answer()
+
+    info = await amnezia.get_server_info()
+
+    if not info:
+        await safe_edit(
+            callback.message,
+            "❌ <b>Сервер недоступен</b>",
+            reply_markup=kb_server_status(),
+        )
+        return
+
+    region = info.get("region") or info.get("serverRegion") or "—"
+    pr = info.get("protocols") or info.get("protocolsEnabled") or []
+    if isinstance(pr, str):
+        pr = [pr]
+    proto = ", ".join(pr) if pr else "—"
+    cnt = info.get("peersCount") or info.get("totalPeers") or info.get("clientsCount") or "—"
+    mx = info.get("maxPeers") or info.get("serverMaxPeers") or "—"
+
+    await safe_edit(
+        callback.message,
+        f"🖥 <b>Статус сервера</b>\n\n"
+        f"🌍 Регион: <code>{html.escape(str(region))}</code>\n"
+        f"🔌 Протоколы: <code>{html.escape(str(proto))}</code>\n"
+        f"👥 Клиентов: <b>{cnt}</b> / {mx}",
+        reply_markup=kb_server_status(),
+    )
+
 async def cb_buy_subscription(callback: CallbackQuery, state: FSMContext):
     await safe_edit(
         callback.message,
@@ -843,7 +874,6 @@ async def main():
     dp.callback_query.register(cb_user_del_profile_do, F.data.startswith("user_del_profile_do:"))
     dp.callback_query.register(cb_buy_subscription,   F.data == "buy_subscription")
     dp.callback_query.register(cb_buy_tariff,         F.data.startswith("buy_tariff:"))
-    dp.callback_query.register(cb_server_status,       F.data == "server_status")
     dp.callback_query.register(cb_server_status,       F.data == "server_status")
 
     async def on_startup():
