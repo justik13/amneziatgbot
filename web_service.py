@@ -712,81 +712,24 @@ def robots_txt():
     return resp
 
 
+from flask import request, jsonify, render_template_string, redirect
+import json
+
 @web_app.route("/")
 def web_index():
+    init_data = request.headers.get("X-Telegram-Init-Data")
+    if init_data:
+        # Здесь можно добавить проверку и обработку initData
+        return "WebApp initialization data received"
+    
     if request.headers.get("User-Agent", "").lower().find("curl") != -1:
         return jsonify({"message": "Этот эндпоинт предназначен для браузеров."}), 403
 
-    return """
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>Личный кабинет туннеля</title>
-<style>
-body {
-  font-family: Arial, sans-serif;
-  background-color: #f4f4f9;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  height: 100vh;
-  margin: 0;
-}
-.form-container {
-  background-color: white;
-  padding: 20px;
-  border-radius: 8px;
-  box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-  width: 300px;
-  text-align: center;
-}
-.form-container h2 {
-  margin-bottom: 20px;
-  color: #333;
-}
-.form-container input[type="text"],
-.form-container input[type="password"] {
-  width: calc(100% - 22px);
-  padding: 10px;
-  margin: 10px 0;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-}
-.form-container button {
-  background-color: #3498db;
-  color: white;
-  padding: 10px 20px;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  width: 100%;
-}
-.form-container button:hover {
-  background-color: #2980b9;
-}
-.error-message {
-  color: red;
-  margin-top: 10px;
-}
-</style>
-</head>
-<body>
-<div class="form-container">
-  <h2>Личный кабинет туннеля</h2>
-  <form action="/web/login" method="post">
-    <input type="text" name="login" placeholder="Логин туннеля" required>
-    <input type="password" name="password" placeholder="Пароль" required>
-    <button type="submit">Войти</button>
-  </form>
-  {% if error %}
-  <div class="error-message">{{ error }}</div>
-  {% endif %}
-</div>
-</body>
-</html>
-"""
+    return redirect("/web/login")
+
+@web_app.route("/web/login")
+def login():
+    return render_template_string(web_index())
 
 
 @web_app.route("/api/ping")
