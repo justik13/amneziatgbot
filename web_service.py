@@ -714,17 +714,79 @@ def robots_txt():
 
 @web_app.route("/")
 def web_index():
-    dyn_token  = generate_dynamic_token()
-    mtproto_js = _get_obfuscated_mtproto_js()
-    content = (
-        WEB_HTML
-        .replace("__SHARED_CSS__",        _SHARED_CSS)
-        .replace("__SHARED_JS__",         _SHARED_JS)
-        .replace("__INSTRUCTION_BLOCK__", _INSTRUCTION_BLOCK)
-        .replace("__DYNAMIC_TOKEN__",     dyn_token)
-        .replace("__MTPROTO_LINKS__",     mtproto_js)
-    )
-    return render_template_string(content)
+    if request.headers.get("User-Agent", "").lower().find("curl") != -1:
+        return jsonify({"message": "Этот эндпоинт предназначен для браузеров."}), 403
+
+    return """
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Личный кабинет туннеля</title>
+<style>
+body {
+  font-family: Arial, sans-serif;
+  background-color: #f4f4f9;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  margin: 0;
+}
+.form-container {
+  background-color: white;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+  width: 300px;
+  text-align: center;
+}
+.form-container h2 {
+  margin-bottom: 20px;
+  color: #333;
+}
+.form-container input[type="text"],
+.form-container input[type="password"] {
+  width: calc(100% - 22px);
+  padding: 10px;
+  margin: 10px 0;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+.form-container button {
+  background-color: #3498db;
+  color: white;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  width: 100%;
+}
+.form-container button:hover {
+  background-color: #2980b9;
+}
+.error-message {
+  color: red;
+  margin-top: 10px;
+}
+</style>
+</head>
+<body>
+<div class="form-container">
+  <h2>Личный кабинет туннеля</h2>
+  <form action="/web/login" method="post">
+    <input type="text" name="login" placeholder="Логин туннеля" required>
+    <input type="password" name="password" placeholder="Пароль" required>
+    <button type="submit">Войти</button>
+  </form>
+  {% if error %}
+  <div class="error-message">{{ error }}</div>
+  {% endif %}
+</div>
+</body>
+</html>
+"""
 
 
 @web_app.route("/api/ping")
@@ -738,91 +800,6 @@ def api_ping():
     return jsonify({"ping_ms": ms})
 
 
-@web_app.route("/connect", methods=["POST"])
-def web_connect():
-    ip = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[0].strip()
-    if not _check_rate_limit(ip):
-        return jsonify({"error": "Слишком много запросов. Подождите минуту."}), 429
-
-    client_token = request.headers.get("X-Dynamic-Token", "")
-    if not client_token or not verify_dynamic_token(client_token, max_age_seconds=300):
-        return jsonify({"error": "Сессия устарела. Пожалуйста, обновите страницу."}), 403
-
-    if "application/json" not in request.headers.get("Content-Type", ""):
-        return jsonify({"error": "Ожидается JSON"}), 400
-
-    if not request.is_json:
-        return jsonify({"error": "Ожидается JSON"}), 400
-
-    data = request.get_json(silent=True) or {}
-    if not isinstance(data, dict):
-        return jsonify({"error": "Некорректный запрос"}), 400
-
-    key = _sanitize_key(data.get("key", ""))
-    if not key:
-        return jsonify({"error": "Некорректный формат ключа"}), 400
-
-    name = _sanitize_name(data.get("name", ""))
-    if not name:
-        return jsonify({"error": "Некорректное имя профиля (только буквы и цифры, до 16 символов)"}), 400
-
-    try:
-        db      = get_db()
-        amnezia = get_amnezia()
-
-        key_record = run_async(db.get_secret_key_by_value(key))
-        if not key_record:
-            return jsonify({"error": "Ключ не найден"}), 403
-        if key_record.get("revoked"):
-            return jsonify({"error": "Ключ отозван"}), 403
-        if key_record.get("used"):
-            return jsonify({"error": "Ключ уже использован"}), 403
-
-        tg_id = key_record["telegram_id"]
-
-        if run_async(db.get_user_key_blocked(tg_id)):
-            return jsonify({"error": "Создание профилей заблокировано администратором"}), 403
-
-        max_key = settings.MAX_KEY_PROFILES_PER_USER
-        if not run_async(db.can_create_key_profile(tg_id, max_key)):
-            return jsonify({"error": f"Достигнут лимит профилей по ключу ({max_key})"}), 400
-
-        if run_async(db.is_vpn_name_taken(name)):
-            return jsonify({"error": "Имя профиля уже занято, выберите другое"}), 409
-
-        result = run_async(amnezia.create_user(name), timeout=30)
-        if result is None:
-            return jsonify({"error": "Ошибка сервера. Попробуйте позже."}), 502
-
-        peer_id    = result.get("client", {}).get("id")
-        config_str = result.get("client", {}).get("config", "")
-
-        profile_id = run_async(db.add_profile(
-            tg_id, name, peer_id,
-            json.dumps(result, ensure_ascii=False),
-            via_key=True,
-        ))
-        run_async(db.set_key_used(key_record["id"]))
-
-        slug = _unique_slug(db)
-        run_async(db.get_or_create_short_link(profile_id, slug))
-        domain    = settings.SHORT_LINK_DOMAIN.rstrip("/")
-        short_url = f"https://{domain}/c/{slug}"
-
-        return jsonify({
-            "ok": True,
-            "config":     config_str,
-            "short_link": short_url,
-            "vpn_name":   name,
-            "profile_id": profile_id,
-        })
-
-    except RuntimeError as e:
-        logger.error("web_connect runtime error: %s", e)
-        return jsonify({"error": "Сервер временно недоступен. Попробуйте позже."}), 503
-    except Exception as e:
-        logger.error("web_connect unexpected error: %s\n%s", e, traceback.format_exc())
-        return jsonify({"error": "Внутренняя ошибка сервера"}), 500
 
 
 def _unique_slug(db: Database) -> str:
@@ -999,6 +976,61 @@ def _config_page(vpn_name: str, config: str) -> str:
 </body>
 </html>"""
 
+
+@web_app.route("/api/payments/callback", methods=["POST"])
+def platega_callback():
+    merchant_id = request.headers.get("X-MerchantId")
+    secret      = request.headers.get("X-Secret")
+
+    if merchant_id != settings.PLATEGA_MERCHANT_ID or secret != settings.PLATEGA_SECRET:
+        return jsonify({"status": "error"}), 403
+
+    data = request.json
+    status     = data.get("status")
+    payment_id = data.get("payment_id") or data.get("transaction_id")
+
+    if status == "CONFIRMED":
+        asyncio.run(get_db().confirm_platega_payment(payment_id))
+
+    return jsonify({"status": "success"}), 200
+
+from flask import session
+
+@web_app.route("/web/login", methods=["POST"])
+def login():
+    login = request.form.get("login")
+    password = request.form.get("password")
+
+    user = asyncio.run(get_db().authenticate_web_user(login, password))
+    if not user:
+        return render_template_string(web_index(), error="Неверный логин или пароль"), 401
+
+    session["user_id"] = user["telegram_id"]
+    return redirect("/web/download-config")
+
+from flask import send_file
+
+@web_app.route("/web/download-config")
+def download_config():
+    if "user_id" not in session:
+        return redirect("/")
+
+    user_id = session["user_id"]
+    premium_status = asyncio.run(get_db().check_user_premium_status(user_id))
+    if not premium_status["is_premium"]:
+        return render_template_string(_error_page("У вас нет активной подписки")), 403
+
+    profile = asyncio.run(get_db().get_profile_by_name(f"tunnel_{user_id}"))
+    if not profile:
+        return render_template_string(_error_page("Профиль не найден")), 404
+
+    config_str = asyncio.run(get_amnezia().get_client_config(profile["peer_id"] or profile["vpn_name"]))
+    if not config_str:
+        return render_template_string(_error_page("Конфигурация недоступна")), 503
+
+    response = make_response(config_str)
+    response.headers["Content-Disposition"] = f"attachment; filename=tunnel_{user_id}.{'awg' if settings.AMNEZIA_PROTOCOL == 'amneziawg2' else 'conf'}"
+    return response
 
 if __name__ == "__main__":
     host = getattr(settings, "WEB_HOST", "0.0.0.0")

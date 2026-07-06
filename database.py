@@ -475,7 +475,7 @@ class Database:
         from config import settings
         tariff_grid = settings.TARIFF_GRID
         amount = row["amount"]
-        days = next((t['days'] for t in tariff_grid if t['amount'] == amount), 0)
+        days = settings.TARIFF_GRID.get(amount, {}).get("days", 0)
 
         current_timestamp = int(time.time())
         async with self._conn.execute(
