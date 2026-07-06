@@ -1072,3 +1072,64 @@ if __name__ == "__main__":
     port = getattr(settings, "WEB_PORT", 5001)
     logger.info("Web Service запущен на http://%s:%s", host, port)
     web_app.run(host=host, port=port, debug=False, threaded=True)
+
+
+INDEX_HTML = """
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Загрузка...</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script>
+  if (window.Telegram && window.Telegram.WebApp) {
+    const initData = window.Telegram.WebApp.initData;
+    if (initData) {
+      fetch('/web/tg-auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initData })
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (data.success) {
+          window.location.href = '/web/download-config';
+        } else {
+          window.location.href = '/web/login';
+        }
+      }).catch(() => { window.location.href = '/web/login'; });
+    } else {
+      window.location.href = '/web/login';
+    }
+  } else {
+    window.location.href = '/web/login';
+  }
+</script>
+</head>
+<body>
+</body>
+</html>
+"""
+
+def parse_init_data(init_data_str):
+    try:
+        params = dict(urllib.parse.parse_qsl(init_data_str))
+        if 'user' in params:
+            user_data = json.loads(params['user'])
+            return user_data.get('id') or user_data.get('telegram_id')
+    except Exception:
+        pass
+    return None
+
+@web_app.route("/web/tg-auth", methods=["POST"])
+def web_tg_auth():
+    data = request.json or {}
+    init_data = data.get("initData")
+    if not init_data:
+        return jsonify({"success": False}), 400
+    user_id = parse_init_data(init_data)
+    if user_id:
+        session["user_id"] = user_id
+        return jsonify({"success": True})
+    return jsonify({"success": False}), 400
