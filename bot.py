@@ -166,10 +166,25 @@ def validate_vpn_name(name: str) -> tuple[bool, str]:
     return True, ""
 
 
+import datetime
+
 async def _build_main_menu(uid: int, db: Database) -> tuple[str, Any]:
     user_data = await db.get_user(uid)
+    premium_status = await db.check_user_premium_status(uid)
+    
+    if premium_status["is_premium"]:
+        subscription_text = (
+            f"Доступ к свободному интернету: Активен. "
+            f"Срок действия: до {premium_status['expiry_date'].strftime('%d.%m.%Y')}"
+        )
+    else:
+        subscription_text = (
+            "Доступ к свободному интернету приостановлен. "
+            "Пожалуйста, продлите подписку для восстановления защищенного туннеля."
+        )
+    
     admin = is_admin(uid)
-    return menu_text(user_data), kb_main(admin=admin)
+    return menu_text(user_data, subscription_text), kb_main(admin=admin)
 
 
 async def cmd_start(message: Message, state: FSMContext, db: Database):
