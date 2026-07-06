@@ -724,29 +724,96 @@ LOGIN_HTML = """
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>Вход</title>
 <style>
-/* Здесь можно добавить стили для формы входа */
+  body {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    background-color: #f5f5f5;
+    margin: 0;
+  }
+  .card {
+    background-color: white;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    width: 300px;
+    text-align: center;
+  }
+  .card h1 {
+    margin-bottom: 20px;
+    color: #333;
+  }
+  .field {
+    margin-bottom: 15px;
+    text-align: left;
+  }
+  .label {
+    display: block;
+    margin-bottom: 5px;
+    color: #666;
+  }
+  .input {
+    width: 100%;
+    padding: 8px;
+    box-sizing: border-box;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+  }
+  .btn-primary {
+    background-color: #28a745;
+    color: white;
+    border: none;
+    padding: 10px 15px;
+    border-radius: 4px;
+    cursor: pointer;
+    width: 100%;
+  }
+  .btn-primary:hover {
+    background-color: #218838;
+  }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <div class="header">
-    <h1>Войти</h1>
-  </div>
-
-  <div class="card">
-    <form method="POST" action="/web/login">
-      <div class="field">
-        <label class="label">Логин</label>
-        <input class="input" type="text" name="login" required>
-      </div>
-      <div class="field">
-        <label class="label">Пароль</label>
-        <input class="input" type="password" name="password" required>
-      </div>
-      <button class="btn btn-primary" type="submit">Войти</button>
-    </form>
-  </div>
+<div class="card">
+  <h1>Войти</h1>
+  <form method="POST" action="/web/login">
+    <div class="field">
+      <label class="label">Логин</label>
+      <input class="input" type="text" name="login" required>
+    </div>
+    <div class="field">
+      <label class="label">Пароль</label>
+      <input class="input" type="password" name="password" required>
+    </div>
+    <button class="btn-primary" type="submit">Войти</button>
+  </form>
 </div>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script>
+  if (window.Telegram && window.Telegram.WebApp) {
+    const initData = window.Telegram.WebApp.initData;
+    if (initData) {
+      fetch('/web/tg-auth', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ initData })
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (data.success) {
+          window.location.href = '/web/download-config';
+        } else {
+          alert('Ошибка авторизации');
+        }
+      });
+    } else {
+      window.location.href = '/web/login';
+    }
+  }
+</script>
 </body>
 </html>
 """
@@ -977,7 +1044,25 @@ def platega_callback():
 
     return jsonify({"status": "success"}), 200
 
-# Этот блок уже включен выше, поэтому его не нужно добавлять снова.
+@web_app.route("/web/tg-auth", methods=["POST"])
+def web_tg_auth():
+    data = request.json
+    init_data = data.get("initData")
+    
+    if not init_data:
+        return jsonify({"success": False}), 400
+
+    try:
+        user_id = parse_init_data(init_data)
+        session["user_id"] = user_id
+        return jsonify({"success": True})
+    except Exception as e:
+        logger.error(f"Ошибка при обработке initData: {e}")
+        return jsonify({"success": False}), 400
+
+def parse_init_data(init_data):
+    # Реализуйте парсинг initData и извлечение user_id
+    pass
 
 @web_app.route("/web/login", methods=["POST"])
 def web_login_page_post():
