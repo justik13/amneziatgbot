@@ -487,14 +487,74 @@ class Database:
             row = await cur.fetchone()
             return row["slug"] if row else None
 
+    async def get_user_key_blocked(self, telegram_id: int) -> bool:
+        await self.ensure_user(telegram_id)
+        async with self._conn.execute("SELECT key_blocked FROM users WHERE telegram_id=?", (telegram_id,)) as cur:
+            row = await cur.fetchone()
+            return bool(row["key_blocked"]) if row else False
+
+    async def set_user_can_create_key(self, telegram_id: int, can_create: bool) -> None:
+        await self.ensure_user(telegram_id)
+        await self._conn.execute(
+            "UPDATE users SET key_blocked=? WHERE telegram_id=?",
+            (0 if can_create else 1, telegram_id),
+        )
+        await self._conn.commit()
+
+    async def get_secret_key_by_user(self, telegram_id: int) -> Optional[dict]:
+        async with self._conn.execute(
+            "SELECT * FROM secret_keys WHERE telegram_id=? ORDER BY id DESC LIMIT 1",
+            (telegram_id,),
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+    async def get_secret_key(self, key_value: str) -> Optional[dict]:
+        async with self._conn.execute("SELECT * FROM secret_keys WHERE key_value=?", (key_value,)) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+    async def create_secret_key(self, telegram_id: int, key_value: str) -> None:
+        await self.ensure_user(telegram_id)
+        await self._conn.execute(
+            "UPDATE secret_keys SET revoked=1 WHERE telegram_id=? AND revoked=0",
+            (telegram_id,),
+        )
+        await self._conn.execute(
+            "INSERT INTO secret_keys (telegram_id, key_value) VALUES (?, ?)",
+            (telegram_id, key_value),
+        )
+        await self._conn.commit()
+
+    async def mark_secret_key_used(self, key_value: str) -> None:
+        await self._conn.execute(
+            "UPDATE secret_keys SET used=1, used_at=datetime('now', 'localtime') WHERE key_value=?",
+            (key_value,),
+        )
+        await self._conn.commit()
+
+    async def get_all_secret_keys(self) -> list[dict]:
+        async with self._conn.execute("SELECT * FROM secret_keys ORDER BY created_at DESC, id DESC") as cur:
+            return [dict(row) for row in await cur.fetchall()]
+
+    async def revoke_secret_key(self, key_id: int) -> bool:
+        cur = await self._conn.execute("UPDATE secret_keys SET revoked=1 WHERE id=?", (key_id,))
+        await self._conn.commit()
+        return cur.rowcount > 0
+
+    @staticmethod
     def hash_password(password: str) -> str:
         salt = secrets.token_hex(16)
         pwdhash = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000).hex()
         return f"{salt}${pwdhash}"
 
+    @staticmethod
     def verify_password(stored_password_hash: str, provided_password: str) -> bool:
-        salt, pwdhash = stored_password_hash.split('$')
-        return pwdhash == hashlib.pbkdf2_hmac('sha256', provided_password.encode(), salt.encode(), 100000).hex()
+        if not stored_password_hash or '$' not in stored_password_hash:
+            return False
+        salt, pwdhash = stored_password_hash.split('$', 1)
+        expected = hashlib.pbkdf2_hmac('sha256', provided_password.encode(), salt.encode(), 100000).hex()
+        return secrets.compare_digest(pwdhash, expected)
 
     async def confirm_platega_payment(self, payment_id: str):
         async with self._conn.execute("SELECT * FROM payments WHERE payment_id=?", (payment_id,)) as cur:

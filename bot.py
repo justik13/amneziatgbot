@@ -856,10 +856,8 @@ async def cb_payment_stub_success(callback: CallbackQuery, db: Database):
 
 async def set_bot_commands(bot: Bot):
     commands = [
-        BotCommand(command="start",  description="🏠 Главное меню"),
-        BotCommand(command="menu",   description="🏠 Открыть меню"),
-        BotCommand(command="mykey",  description="🔑 Мой секретный ключ"),
-        BotCommand(command="newkey", description="🔄 Создать новый ключ"),
+        BotCommand(command="start",  description="💳 Купить VPN"),
+        BotCommand(command="menu",   description="💳 Купить VPN"),
     ]
     await bot.set_my_commands(commands, scope=BotCommandScopeDefault())
 
@@ -905,17 +903,9 @@ async def main():
     dp.callback_query.register(cb_back_main,          F.data == "back_main")
     dp.callback_query.register(cb_cancel,              F.data == "cancel")
     dp.callback_query.register(cb_noop,                F.data == "noop")
-    dp.callback_query.register(cb_create_vpn,          F.data == "create_vpn")
-    dp.callback_query.register(cb_confirm_create,      F.data.startswith("confirm_create:"))
-    dp.callback_query.register(cb_get_config_profile,  F.data.startswith("get_config_profile:"))
-    dp.callback_query.register(cb_my_profiles,         F.data == "my_profiles")
-    dp.callback_query.register(cb_my_info_profile,     F.data.startswith("my_info_profile:"))
-    dp.callback_query.register(cb_user_del_profile,    F.data.startswith("user_del_profile:") & ~F.data.startswith("user_del_profile_do:"))
-    dp.callback_query.register(cb_user_del_profile_do, F.data.startswith("user_del_profile_do:"))
     dp.callback_query.register(cb_buy_subscription,   F.data == "buy_subscription")
     dp.callback_query.register(cb_buy_tariff,         F.data.startswith("buy_tariff:"))
     dp.callback_query.register(cb_payment_stub_success, F.data.startswith("payment_stub_success:"))
-    dp.callback_query.register(cb_server_status,       F.data == "server_status")
 
     async def on_startup():
         await set_bot_commands(bot)

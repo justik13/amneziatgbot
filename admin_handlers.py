@@ -1245,7 +1245,7 @@ async def cb_admin_key_revoke(callback: CallbackQuery, db: Database, amnezia: Am
                 tg_id,
                 "🔑 Ваш секретный ключ был <b>отозван</b> администратором.\n"
                 "Все ваши VPN-профили были <b>удалены</b>.\n"
-                "Создайте новый ключ через /mykey",
+                "Создайте новый ключ в Mini App",
                 parse_mode=ParseMode.HTML,
             )
         except Exception:

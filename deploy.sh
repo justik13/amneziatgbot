@@ -65,7 +65,7 @@ if [ ! -f ".env" ]; then
 
   # Запись в .env
   sed -i "s|^BOT_TOKEN=.*|BOT_TOKEN=${bot_token}|" .env || echo "BOT_TOKEN=${bot_token}" >> .env
-  sed -i "s|^ADMIN_IDS=.*|ADMIN_IDS=[${admin_ids}]|" .env || echo "ADMIN_IDS=[${admin_ids}]" >> .env
+  sed -i "s|^ADMIN_IDS=.*|ADMIN_IDS=${admin_ids}|" .env || echo "ADMIN_IDS=${admin_ids}" >> .env
   sed -i "s|^AMNEZIA_API_URL=.*|AMNEZIA_API_URL=${amnezia_url}|" .env || echo "AMNEZIA_API_URL=${amnezia_url}" >> .env
   sed -i "s|^AMNEZIA_API_KEY=.*|AMNEZIA_API_KEY=${amnezia_key}|" .env || echo "AMNEZIA_API_KEY=${amnezia_key}" >> .env
   sed -i "s|^MINIAPP_URL=.*|MINIAPP_URL=${miniapp_url}|" .env || echo "MINIAPP_URL=${miniapp_url}" >> .env

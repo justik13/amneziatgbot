@@ -50,7 +50,8 @@ class Settings(BaseSettings):
     @classmethod
     def parse_admins(cls, v: str | list | int) -> list[int]:
         if isinstance(v, str):
-            return [int(x.strip()) for x in v.split(",") if x.strip()]
+            cleaned = v.strip().strip("[]")
+            return [int(x.strip()) for x in cleaned.split(",") if x.strip()]
         if isinstance(v, int):
             return [v]
         return v

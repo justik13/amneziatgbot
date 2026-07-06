@@ -826,6 +826,64 @@ def _unique_slug(db: Database) -> str:
     return "".join(random.choices(SLUG_CHARS, k=6))
 
 
+@web_app.route("/connect", methods=["POST"])
+def web_connect():
+    if not verify_dynamic_token(request.headers.get("X-Dynamic-Token", "")):
+        return jsonify({"error": "Сессия устарела. Обновите страницу."}), 403
+    if not _check_rate_limit(request.remote_addr or "unknown"):
+        return jsonify({"error": "Слишком много запросов. Попробуйте позже."}), 429
+
+    data = request.get_json(silent=True) or {}
+    key_value = _sanitize_key(data.get("key", ""))
+    vpn_name = _sanitize_name(data.get("name", ""))
+    if not key_value or not vpn_name:
+        return jsonify({"error": "Некорректный ключ или имя профиля"}), 400
+
+    try:
+        db = get_db()
+        secret = run_async(db.get_secret_key(key_value))
+        if not secret or secret.get("revoked"):
+            return jsonify({"error": "Ключ не найден или отозван"}), 404
+        if secret.get("used"):
+            return jsonify({"error": "Ключ уже использован"}), 409
+
+        uid = int(secret["telegram_id"])
+        premium = run_async(db.check_user_premium_status(uid))
+        if not premium.get("is_premium"):
+            return jsonify({"error": "Подписка не активна. Оплатите доступ в Telegram-боте."}), 402
+        if run_async(db.get_user_key_blocked(uid)):
+            return jsonify({"error": "Создание ключей заблокировано"}), 403
+        if not run_async(db.can_create_key_profile(uid, settings.MAX_KEY_PROFILES_PER_USER)):
+            return jsonify({"error": "Достигнут лимит профилей по ключу"}), 409
+        if run_async(db.is_vpn_name_taken(vpn_name)):
+            return jsonify({"error": "Имя профиля уже занято"}), 409
+
+        result = run_async(get_amnezia().create_user(vpn_name), timeout=35)
+        if not result:
+            return jsonify({"error": "Не удалось создать VPN-профиль"}), 502
+
+        peer_id = result.get("client", {}).get("id")
+        profile_id = run_async(db.add_profile(uid, vpn_name, peer_id, json.dumps(result, ensure_ascii=False), via_key=True))
+        run_async(db.mark_secret_key_used(key_value))
+
+        config_str = result.get("client", {}).get("config")
+        if not config_str:
+            config_str = run_async(get_amnezia().get_client_config(peer_id or vpn_name), timeout=15)
+        if not config_str:
+            return jsonify({"error": "Профиль создан, но конфигурация временно недоступна"}), 503
+
+        slug = _unique_slug(db)
+        slug = run_async(db.get_or_create_short_link(profile_id, slug))
+        domain = getattr(settings, "SHORT_LINK_DOMAIN", "").strip().rstrip("/") or request.host
+        short_link = f"https://{domain}/c/{slug}"
+        return jsonify({"config": config_str, "short_link": short_link})
+    except RuntimeError:
+        return jsonify({"error": "Сервер временно недоступен"}), 503
+    except Exception as e:
+        logger.error("web_connect error: %s\n%s", e, traceback.format_exc())
+        return jsonify({"error": "Внутренняя ошибка сервера"}), 500
+
+
 @web_app.route("/c/<slug>")
 def web_short_link(slug: str):
     clean_slug = slug.strip()[:10]
@@ -1084,11 +1142,19 @@ INDEX_HTML = """
 </html>
 """
 
-def parse_init_data(init_data_str):
+def parse_init_data(init_data_str, max_age_seconds: int = 86400):
     try:
         params = dict(urllib.parse.parse_qsl(init_data_str, keep_blank_values=True))
         received_hash = params.pop("hash", None)
         if not received_hash:
+            return None
+
+        auth_date_raw = params.get("auth_date")
+        if not auth_date_raw:
+            return None
+        auth_date = int(auth_date_raw)
+        now = int(time.time())
+        if auth_date > now + 60 or now - auth_date > max_age_seconds:
             return None
 
         data_check = "\n".join(f"{key}={value}" for key, value in sorted(params.items()))

@@ -259,22 +259,16 @@ def kb_main(admin: bool = False) -> InlineKeyboardMarkup:
     ])
 
     rows.append([
+        InlineKeyboardButton(text="📱 Мои профили", callback_data="my_profiles"),
+    ])
+
+    rows.append([
         InlineKeyboardButton(
             text="🚀 Личный кабинет VPN",
             web_app=WebAppInfo(url=(getattr(settings, "MINIAPP_URL", "").strip() or "https://just1kbot.1337.cx/")),
         ),
     ])
 
-    rows.append([
-        InlineKeyboardButton(text="📱 Мои профили", callback_data="my_profiles"),
-    ])
-
-    rows.append([
-        InlineKeyboardButton(
-            text="🟢 Telegram без VPN",
-            url="https://t.me/proxy?server=justik.1337.cx&port=8443&secret=ee756a5c6202570ef20c9ecae8c09809ca7777772e636c6f7564666c6172652e636f6d",
-        ),
-    ])
 
     if admin:
         rows.append([
