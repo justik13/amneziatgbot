@@ -1,6 +1,8 @@
 import asyncio
 import base64
 import html
+import hmac
+import hashlib
 import json
 import logging
 import random
@@ -9,8 +11,9 @@ import string
 import threading
 import traceback
 import time
+import urllib.parse
 from collections import defaultdict
-from flask import Flask, request, jsonify, render_template_string, make_response, redirect
+from flask import Flask, request, jsonify, render_template_string, make_response, redirect, session
 from config import settings
 from database import Database
 from amnezia_client import AmneziaClient
@@ -20,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 web_app = Flask(__name__)
 web_app.config["JSON_AS_ASCII"] = False
+web_app.secret_key = settings.DB_ENCRYPTION_KEY
 from security import check_scanner; check_scanner(web_app, "/")
 
 SLUG_CHARS = string.ascii_lowercase + string.digits
@@ -715,7 +719,6 @@ def robots_txt():
 from flask import request, jsonify, render_template_string, redirect
 import json
 
-@web_app.route("/")
 LOGIN_HTML = """
 <!DOCTYPE html>
 <html lang="ru">
@@ -801,10 +804,6 @@ def web_index():
 def web_login_page_get():
     return render_template_string(LOGIN_HTML)
 
-@web_app.route("/web/login")
-def login():
-    return render_template_string(web_index())
-
 
 @web_app.route("/api/ping")
 def api_ping():
@@ -825,6 +824,64 @@ def _unique_slug(db: Database) -> str:
         if not run_async(db.get_short_link_by_slug(slug)):
             return slug
     return "".join(random.choices(SLUG_CHARS, k=6))
+
+
+@web_app.route("/connect", methods=["POST"])
+def web_connect():
+    if not verify_dynamic_token(request.headers.get("X-Dynamic-Token", "")):
+        return jsonify({"error": "Сессия устарела. Обновите страницу."}), 403
+    if not _check_rate_limit(request.remote_addr or "unknown"):
+        return jsonify({"error": "Слишком много запросов. Попробуйте позже."}), 429
+
+    data = request.get_json(silent=True) or {}
+    key_value = _sanitize_key(data.get("key", ""))
+    vpn_name = _sanitize_name(data.get("name", ""))
+    if not key_value or not vpn_name:
+        return jsonify({"error": "Некорректный ключ или имя профиля"}), 400
+
+    try:
+        db = get_db()
+        secret = run_async(db.get_secret_key(key_value))
+        if not secret or secret.get("revoked"):
+            return jsonify({"error": "Ключ не найден или отозван"}), 404
+        if secret.get("used"):
+            return jsonify({"error": "Ключ уже использован"}), 409
+
+        uid = int(secret["telegram_id"])
+        premium = run_async(db.check_user_premium_status(uid))
+        if not premium.get("is_premium"):
+            return jsonify({"error": "Подписка не активна. Оплатите доступ в Telegram-боте."}), 402
+        if run_async(db.get_user_key_blocked(uid)):
+            return jsonify({"error": "Создание ключей заблокировано"}), 403
+        if not run_async(db.can_create_key_profile(uid, settings.MAX_KEY_PROFILES_PER_USER)):
+            return jsonify({"error": "Достигнут лимит профилей по ключу"}), 409
+        if run_async(db.is_vpn_name_taken(vpn_name)):
+            return jsonify({"error": "Имя профиля уже занято"}), 409
+
+        result = run_async(get_amnezia().create_user(vpn_name), timeout=35)
+        if not result:
+            return jsonify({"error": "Не удалось создать VPN-профиль"}), 502
+
+        peer_id = result.get("client", {}).get("id")
+        profile_id = run_async(db.add_profile(uid, vpn_name, peer_id, json.dumps(result, ensure_ascii=False), via_key=True))
+        run_async(db.mark_secret_key_used(key_value))
+
+        config_str = result.get("client", {}).get("config")
+        if not config_str:
+            config_str = run_async(get_amnezia().get_client_config(peer_id or vpn_name), timeout=15)
+        if not config_str:
+            return jsonify({"error": "Профиль создан, но конфигурация временно недоступна"}), 503
+
+        slug = _unique_slug(db)
+        slug = run_async(db.get_or_create_short_link(profile_id, slug))
+        domain = getattr(settings, "SHORT_LINK_DOMAIN", "").strip().rstrip("/") or request.host
+        short_link = f"https://{domain}/c/{slug}"
+        return jsonify({"config": config_str, "short_link": short_link})
+    except RuntimeError:
+        return jsonify({"error": "Сервер временно недоступен"}), 503
+    except Exception as e:
+        logger.error("web_connect error: %s\n%s", e, traceback.format_exc())
+        return jsonify({"error": "Внутренняя ошибка сервера"}), 500
 
 
 @web_app.route("/c/<slug>")
@@ -1011,26 +1068,6 @@ def platega_callback():
 
     return jsonify({"status": "success"}), 200
 
-@web_app.route("/web/tg-auth", methods=["POST"])
-def web_tg_auth():
-    data = request.json
-    init_data = data.get("initData")
-    
-    if not init_data:
-        return jsonify({"success": False}), 400
-
-    try:
-        user_id = parse_init_data(init_data)
-        session["user_id"] = user_id
-        return jsonify({"success": True})
-    except Exception as e:
-        logger.error(f"Ошибка при обработке initData: {e}")
-        return jsonify({"success": False}), 400
-
-def parse_init_data(init_data):
-    # Реализуйте парсинг initData и извлечение user_id
-    pass
-
 @web_app.route("/web/login", methods=["POST"])
 def web_login_page_post():
     login = request.form.get("login")
@@ -1066,13 +1103,6 @@ def download_config():
     response = make_response(config_str)
     response.headers["Content-Disposition"] = f"attachment; filename=tunnel_{user_id}.{'awg' if settings.AMNEZIA_PROTOCOL == 'amneziawg2' else 'conf'}"
     return response
-
-if __name__ == "__main__":
-    host = getattr(settings, "WEB_HOST", "0.0.0.0")
-    port = getattr(settings, "WEB_PORT", 5001)
-    logger.info("Web Service запущен на http://%s:%s", host, port)
-    web_app.run(host=host, port=port, debug=False, threaded=True)
-
 
 INDEX_HTML = """
 <!DOCTYPE html>
@@ -1112,9 +1142,27 @@ INDEX_HTML = """
 </html>
 """
 
-def parse_init_data(init_data_str):
+def parse_init_data(init_data_str, max_age_seconds: int = 86400):
     try:
-        params = dict(urllib.parse.parse_qsl(init_data_str))
+        params = dict(urllib.parse.parse_qsl(init_data_str, keep_blank_values=True))
+        received_hash = params.pop("hash", None)
+        if not received_hash:
+            return None
+
+        auth_date_raw = params.get("auth_date")
+        if not auth_date_raw:
+            return None
+        auth_date = int(auth_date_raw)
+        now = int(time.time())
+        if auth_date > now + 60 or now - auth_date > max_age_seconds:
+            return None
+
+        data_check = "\n".join(f"{key}={value}" for key, value in sorted(params.items()))
+        secret_key = hmac.new(b"WebAppData", settings.BOT_TOKEN.encode(), hashlib.sha256).digest()
+        expected_hash = hmac.new(secret_key, data_check.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected_hash, received_hash):
+            return None
+
         if 'user' in params:
             user_data = json.loads(params['user'])
             return user_data.get('id') or user_data.get('telegram_id')
@@ -1133,3 +1181,9 @@ def web_tg_auth():
         session["user_id"] = user_id
         return jsonify({"success": True})
     return jsonify({"success": False}), 400
+
+if __name__ == "__main__":
+    host = getattr(settings, "WEB_HOST", "0.0.0.0")
+    port = getattr(settings, "WEB_PORT", 5001)
+    logger.info("Web Service запущен на http://%s:%s", host, port)
+    web_app.run(host=host, port=port, debug=False, threaded=True)

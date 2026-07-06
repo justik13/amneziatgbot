@@ -2,6 +2,7 @@ import os
 
 from pydantic_settings import BaseSettings
 from pydantic import field_validator
+from typing import ClassVar
 
 
 class Settings(BaseSettings):
@@ -35,11 +36,11 @@ class Settings(BaseSettings):
 
     MTPROTO_LINKS: str = ""
 
-    PLATEGA_MERCHANT_ID: str
-    PLATEGA_SECRET: str
-    PLATEGA_API_KEY: str
+    PLATEGA_MERCHANT_ID: str = ""
+    PLATEGA_SECRET: str = ""
+    PLATEGA_API_KEY: str = ""
 
-    TARIFF_GRID = {
+    TARIFF_GRID: ClassVar[dict[int, dict[str, int]]] = {
         25: {"days": 7, "max_devices": 1},
         90: {"days": 30, "max_devices": 3},
         250: {"days": 90, "max_devices": 5}
@@ -49,7 +50,8 @@ class Settings(BaseSettings):
     @classmethod
     def parse_admins(cls, v: str | list | int) -> list[int]:
         if isinstance(v, str):
-            return [int(x.strip()) for x in v.split(",") if x.strip()]
+            cleaned = v.strip().strip("[]")
+            return [int(x.strip()) for x in cleaned.split(",") if x.strip()]
         if isinstance(v, int):
             return [v]
         return v

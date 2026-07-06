@@ -167,21 +167,22 @@ def validate_vpn_name(name: str) -> tuple[bool, str]:
     return True, ""
 
 
-import datetime
+from datetime import datetime
 
 async def _build_main_menu(uid: int, db: Database) -> tuple[str, Any]:
     user_data = await db.get_user(uid)
     premium_status = await db.check_user_premium_status(uid)
     
     if premium_status["is_premium"]:
+        expires_at = premium_status.get("subscription_ends_at") or 0
+        expiry_label = datetime.fromtimestamp(expires_at).strftime("%d.%m.%Y") if expires_at else "—"
         subscription_text = (
-            f"Доступ к свободному интернету: Активен. "
-            f"Срок действия: до {premium_status['expiry_date'].strftime('%d.%m.%Y')}"
+            f"🟢 Подписка активна до <b>{expiry_label}</b>. "
+            f"Можно создавать и управлять защищёнными VPN-профилями."
         )
     else:
         subscription_text = (
-            "Доступ к свободному интернету приостановлен. "
-            "Пожалуйста, продлите подписку для восстановления защищенного туннеля."
+            "🔒 Подписка не активна. Выберите тариф, чтобы получить доступ к VPN."
         )
     
     admin = is_admin(uid)
@@ -743,11 +744,16 @@ async def cb_user_del_profile_do(callback: CallbackQuery, db: Database,
 
 def kb_tariff_selection():
     inline_keyboard = []
-    if hasattr(settings, "TARIFF_GRID") and isinstance(settings.TARIFF_GRID, dict):
-        for amount, info in settings.TARIFF_GRID.items():
-            days = info.get("days", 0)
-            text = f"Свободный интернет: {days} дней — {amount} руб"
-            inline_keyboard.append([InlineKeyboardButton(text=text, callback_data=f"buy_tariff:{amount}")])
+    for amount, info in settings.TARIFF_GRID.items():
+        days = info.get("days", 0)
+        devices = info.get("max_devices", MAX_PROFILES_PER_USER)
+        inline_keyboard.append([
+            InlineKeyboardButton(
+                text=f"{days} дней · {amount} ₽ · до {devices} устройств",
+                callback_data=f"buy_tariff:{amount}",
+            )
+        ])
+    inline_keyboard.append([InlineKeyboardButton(text="🔙 Назад", callback_data="back_main")])
     return InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
 
 async def cb_server_status(callback: CallbackQuery, amnezia: AmneziaClient):
@@ -784,7 +790,9 @@ async def cb_server_status(callback: CallbackQuery, amnezia: AmneziaClient):
 async def cb_buy_subscription(callback: CallbackQuery, state: FSMContext):
     await safe_edit(
         callback.message,
-        "Выберите тариф для приобретения:",
+        "💳 <b>Выберите тариф VPN</b>\n\n"
+        "После подключения платежного провайдера эта витрина будет создавать боевой счёт. "
+        "Сейчас оплата работает как безопасная заглушка: заказ сохраняется, но деньги не списываются.",
         reply_markup=kb_tariff_selection(),
     )
     await callback.answer()
@@ -800,26 +808,56 @@ async def cb_buy_tariff(callback: CallbackQuery, db: Database):
     payment_id = generate_secret_key()
     await db.create_payment(uid, payment_id, 'PENDING', amount)
 
-    payment_url = f"https://platega.io/pay/{payment_id}"
+    tariff = settings.TARIFF_GRID.get(amount, {})
+    days = tariff.get("days", 0)
+    devices = tariff.get("max_devices", MAX_PROFILES_PER_USER)
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Оплатить", url=payment_url)],
+        [InlineKeyboardButton(text="✅ Заглушка: отметить как оплачено", callback_data=f"payment_stub_success:{payment_id}")],
+        [InlineKeyboardButton(text="🔙 К тарифам", callback_data="buy_subscription")],
     ])
 
     await safe_edit(
         callback.message,
-        f"Перейдите по ссылке для оплаты:\n\n"
-        f"<a href='{html.escape(payment_url)}'>{html.escape(payment_url)}</a>",
+        f"🧾 <b>Ваш заказ</b>\n\n"
+        f"Тариф: <b>{days} дней</b>\n"
+        f"Устройств: до <b>{devices}</b>\n"
+        f"К оплате: <b>{amount} ₽</b>\n"
+        f"ID заказа: <code>{html.escape(payment_id)}</code>\n\n"
+        "⚠️ Платёжный провайдер пока не подключён. Нажмите кнопку заглушки для тестовой активации.",
         reply_markup=kb,
     )
     await callback.answer()
 
 
+async def cb_payment_stub_success(callback: CallbackQuery, db: Database):
+    payment_id = callback.data.split(":", 1)[1]
+    result = await db.confirm_platega_payment(payment_id)
+    status = await db.check_user_premium_status(callback.from_user.id)
+    expires_at = status.get("subscription_ends_at") or 0
+    expiry_label = datetime.fromtimestamp(expires_at).strftime("%d.%m.%Y") if expires_at else "—"
+    login_block = ""
+    if result and result.get("generated_login"):
+        login_block = (
+            f"\n\n🔐 <b>Резервный вход</b>\n"
+            f"Логин: <code>{html.escape(result['generated_login'])}</code>\n"
+            f"Пароль: <code>{html.escape(result['generated_password'])}</code>\n"
+            "Сохраните пароль: повторно он не показывается."
+        )
+    await safe_edit(
+        callback.message,
+        f"✅ <b>Подписка активирована</b>\n\n"
+        f"Доступ действует до: <b>{expiry_label}</b>\n"
+        "Теперь можно открыть приложение и создать VPN-профиль."
+        f"{login_block}",
+        reply_markup=kb_main(admin=is_admin(callback.from_user.id)),
+    )
+    await callback.answer("Подписка активирована", show_alert=False)
+
+
 async def set_bot_commands(bot: Bot):
     commands = [
-        BotCommand(command="start",  description="🏠 Главное меню"),
-        BotCommand(command="menu",   description="🏠 Открыть меню"),
-        BotCommand(command="mykey",  description="🔑 Мой секретный ключ"),
-        BotCommand(command="newkey", description="🔄 Создать новый ключ"),
+        BotCommand(command="start",  description="💳 Купить VPN"),
+        BotCommand(command="menu",   description="💳 Купить VPN"),
     ]
     await bot.set_my_commands(commands, scope=BotCommandScopeDefault())
 
@@ -865,16 +903,9 @@ async def main():
     dp.callback_query.register(cb_back_main,          F.data == "back_main")
     dp.callback_query.register(cb_cancel,              F.data == "cancel")
     dp.callback_query.register(cb_noop,                F.data == "noop")
-    dp.callback_query.register(cb_create_vpn,          F.data == "create_vpn")
-    dp.callback_query.register(cb_confirm_create,      F.data.startswith("confirm_create:"))
-    dp.callback_query.register(cb_get_config_profile,  F.data.startswith("get_config_profile:"))
-    dp.callback_query.register(cb_my_profiles,         F.data == "my_profiles")
-    dp.callback_query.register(cb_my_info_profile,     F.data.startswith("my_info_profile:"))
-    dp.callback_query.register(cb_user_del_profile,    F.data.startswith("user_del_profile:") & ~F.data.startswith("user_del_profile_do:"))
-    dp.callback_query.register(cb_user_del_profile_do, F.data.startswith("user_del_profile_do:"))
     dp.callback_query.register(cb_buy_subscription,   F.data == "buy_subscription")
     dp.callback_query.register(cb_buy_tariff,         F.data.startswith("buy_tariff:"))
-    dp.callback_query.register(cb_server_status,       F.data == "server_status")
+    dp.callback_query.register(cb_payment_stub_success, F.data.startswith("payment_stub_success:"))
 
     async def on_startup():
         await set_bot_commands(bot)

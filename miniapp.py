@@ -201,6 +201,20 @@ def find_peer(clients_data: dict | None, vpn_name: str) -> dict | None:
             return peers[0] if peers else None
     return None
 
+def _subscription_payload(db: Database, uid: int) -> dict:
+    status = run_async(db.check_user_premium_status(uid))
+    return {
+        "is_premium": bool(status.get("is_premium")),
+        "subscription_ends_at": status.get("subscription_ends_at"),
+        "days_remaining": status.get("days_remaining", 0),
+    }
+
+def _require_active_subscription(db: Database, uid: int):
+    payload = _subscription_payload(db, uid)
+    if not payload["is_premium"] and uid not in settings.ADMIN_IDS:
+        return jsonify({"error": "Подписка не активна. Оплатите доступ в Telegram-боте.", "subscription": payload}), 402
+    return None
+
 def profile_to_json(profile: dict, peer: dict | None = None) -> dict:
     result = {
         "id": profile["id"],
@@ -236,8 +250,9 @@ def api_me():
     is_admin = uid in settings.ADMIN_IDS
     max_profiles = None if is_admin else settings.MAX_PROFILES_PER_USER
 
+    subscription = _subscription_payload(db, uid)
     profiles = run_async(db.get_profiles(uid))
-    can_create = True if is_admin else run_async(db.can_create_profile(uid, settings.MAX_PROFILES_PER_USER))
+    can_create = True if is_admin else (subscription["is_premium"] and run_async(db.can_create_profile(uid, settings.MAX_PROFILES_PER_USER)))
     clients = run_async(amnezia.get_all_clients())
 
     result = []
@@ -250,6 +265,7 @@ def api_me():
         "can_create": can_create,
         "max_profiles": max_profiles,
         "is_admin": is_admin,
+        "subscription": subscription,
         "user": {
             "id": uid,
             "name": g.tg_user.get("first_name", ""),
@@ -267,6 +283,9 @@ def api_create():
     amnezia = get_amnezia()
 
     is_admin = uid in settings.ADMIN_IDS
+    subscription_error = _require_active_subscription(db, uid)
+    if subscription_error:
+        return subscription_error
 
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()[:16]
@@ -299,6 +318,9 @@ def api_delete_profile(profile_id: int):
     uid = g.tg_user["id"]
     db = get_db()
     amnezia = get_amnezia()
+    subscription_error = _require_active_subscription(db, uid)
+    if subscription_error:
+        return subscription_error
 
     profile = run_async(db.get_profile_by_id(profile_id))
     if not profile or profile["telegram_id"] != uid:
@@ -319,6 +341,9 @@ def api_config(profile_id: int):
     uid = g.tg_user["id"]
     db = get_db()
     amnezia = get_amnezia()
+    subscription_error = _require_active_subscription(db, uid)
+    if subscription_error:
+        return subscription_error
 
     profile = run_async(db.get_profile_by_id(profile_id))
     if not profile or profile["telegram_id"] != uid:
@@ -434,6 +459,9 @@ from web_service import generate_secret_key as _gen_secret_key
 def api_mykey():
     uid = g.tg_user["id"]
     db  = get_db()
+    subscription_error = _require_active_subscription(db, uid)
+    if subscription_error:
+        return subscription_error
 
     if run_async(db.get_user_key_blocked(uid)):
         return jsonify({"error": "Создание ключей заблокировано администратором"}), 403
@@ -466,6 +494,9 @@ def api_newkey():
     uid    = g.tg_user["id"]
     db     = get_db()
     domain = getattr(settings, "SHORT_LINK_DOMAIN", "just1kbot.1337.cx").rstrip("/")
+    subscription_error = _require_active_subscription(db, uid)
+    if subscription_error:
+        return subscription_error
 
     if run_async(db.get_user_key_blocked(uid)):
         return jsonify({"error": "Создание ключей заблокировано администратором"}), 403
@@ -1410,6 +1441,12 @@ async function loadProfiles(forceRefresh = false) {
     const keyProfiles = data.profiles.filter(p => p.via_key);
 
     document.getElementById('add-btn').style.display = data.can_create ? '' : 'none';
+
+    if (!data.subscription?.is_premium && !data.is_admin) {
+      document.getElementById('profiles-list').innerHTML =
+        '<div class="empty"><div class="empty-icon">🔒</div><div class="empty-title">Подписка не активна</div><div class="empty-text">Оплатите VPN в Telegram-боте и обновите страницу.</div></div>';
+      return;
+    }
 
     if (!data.profiles.length) {
       document.getElementById('profiles-list').innerHTML =

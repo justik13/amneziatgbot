@@ -16,7 +16,7 @@ from aiogram.types import (
     InlineKeyboardButton,
     ReplyKeyboardMarkup,
     KeyboardButton,
-    # WebAppInfo,  # Убедитесь, что этот импорт уже есть
+    WebAppInfo,
 )
 
 from config import settings
@@ -255,18 +255,16 @@ def kb_main(admin: bool = False) -> InlineKeyboardMarkup:
     rows = []
 
     rows.append([
-        InlineKeyboardButton(
-            text="🚀 Открыть меню",
-            web_app=WebAppInfo(url="https://just1kbot.1337.cx/"),
-        ),
+        InlineKeyboardButton(text="💳 Купить / продлить VPN", callback_data="buy_subscription"),
     ])
 
     rows.append([
         InlineKeyboardButton(
-            text="🟢 Telegram без VPN",
-            url="https://t.me/proxy?server=justik.1337.cx&port=8443&secret=ee756a5c6202570ef20c9ecae8c09809ca7777772e636c6f7564666c6172652e636f6d",
+            text="🚀 Личный кабинет VPN",
+            web_app=WebAppInfo(url=(getattr(settings, "MINIAPP_URL", "").strip() or "https://just1kbot.1337.cx/")),
         ),
     ])
+
 
     if admin:
         rows.append([
