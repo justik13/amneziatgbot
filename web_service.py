@@ -1,6 +1,8 @@
 import asyncio
 import base64
 import html
+import hmac
+import hashlib
 import json
 import logging
 import random
@@ -9,8 +11,9 @@ import string
 import threading
 import traceback
 import time
+import urllib.parse
 from collections import defaultdict
-from flask import Flask, request, jsonify, render_template_string, make_response, redirect
+from flask import Flask, request, jsonify, render_template_string, make_response, redirect, session
 from config import settings
 from database import Database
 from amnezia_client import AmneziaClient
@@ -20,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 web_app = Flask(__name__)
 web_app.config["JSON_AS_ASCII"] = False
+web_app.secret_key = settings.DB_ENCRYPTION_KEY
 from security import check_scanner; check_scanner(web_app, "/")
 
 SLUG_CHARS = string.ascii_lowercase + string.digits
@@ -715,7 +719,6 @@ def robots_txt():
 from flask import request, jsonify, render_template_string, redirect
 import json
 
-@web_app.route("/")
 LOGIN_HTML = """
 <!DOCTYPE html>
 <html lang="ru">
@@ -800,10 +803,6 @@ def web_index():
 @web_app.route("/web/login")
 def web_login_page_get():
     return render_template_string(LOGIN_HTML)
-
-@web_app.route("/web/login")
-def login():
-    return render_template_string(web_index())
 
 
 @web_app.route("/api/ping")
@@ -1011,26 +1010,6 @@ def platega_callback():
 
     return jsonify({"status": "success"}), 200
 
-@web_app.route("/web/tg-auth", methods=["POST"])
-def web_tg_auth():
-    data = request.json
-    init_data = data.get("initData")
-    
-    if not init_data:
-        return jsonify({"success": False}), 400
-
-    try:
-        user_id = parse_init_data(init_data)
-        session["user_id"] = user_id
-        return jsonify({"success": True})
-    except Exception as e:
-        logger.error(f"Ошибка при обработке initData: {e}")
-        return jsonify({"success": False}), 400
-
-def parse_init_data(init_data):
-    # Реализуйте парсинг initData и извлечение user_id
-    pass
-
 @web_app.route("/web/login", methods=["POST"])
 def web_login_page_post():
     login = request.form.get("login")
@@ -1066,13 +1045,6 @@ def download_config():
     response = make_response(config_str)
     response.headers["Content-Disposition"] = f"attachment; filename=tunnel_{user_id}.{'awg' if settings.AMNEZIA_PROTOCOL == 'amneziawg2' else 'conf'}"
     return response
-
-if __name__ == "__main__":
-    host = getattr(settings, "WEB_HOST", "0.0.0.0")
-    port = getattr(settings, "WEB_PORT", 5001)
-    logger.info("Web Service запущен на http://%s:%s", host, port)
-    web_app.run(host=host, port=port, debug=False, threaded=True)
-
 
 INDEX_HTML = """
 <!DOCTYPE html>
@@ -1114,7 +1086,17 @@ INDEX_HTML = """
 
 def parse_init_data(init_data_str):
     try:
-        params = dict(urllib.parse.parse_qsl(init_data_str))
+        params = dict(urllib.parse.parse_qsl(init_data_str, keep_blank_values=True))
+        received_hash = params.pop("hash", None)
+        if not received_hash:
+            return None
+
+        data_check = "\n".join(f"{key}={value}" for key, value in sorted(params.items()))
+        secret_key = hmac.new(b"WebAppData", settings.BOT_TOKEN.encode(), hashlib.sha256).digest()
+        expected_hash = hmac.new(secret_key, data_check.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected_hash, received_hash):
+            return None
+
         if 'user' in params:
             user_data = json.loads(params['user'])
             return user_data.get('id') or user_data.get('telegram_id')
@@ -1133,3 +1115,9 @@ def web_tg_auth():
         session["user_id"] = user_id
         return jsonify({"success": True})
     return jsonify({"success": False}), 400
+
+if __name__ == "__main__":
+    host = getattr(settings, "WEB_HOST", "0.0.0.0")
+    port = getattr(settings, "WEB_PORT", 5001)
+    logger.info("Web Service запущен на http://%s:%s", host, port)
+    web_app.run(host=host, port=port, debug=False, threaded=True)

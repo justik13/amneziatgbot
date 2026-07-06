@@ -88,6 +88,7 @@ class Database:
                 raw_response TEXT,
                 last_ip      TEXT,
                 disabled     INTEGER NOT NULL DEFAULT 0,
+                via_key      INTEGER NOT NULL DEFAULT 0,
                 server_id    TEXT DEFAULT NULL,
                 created_at   TEXT DEFAULT (datetime('now', 'localtime'))
             )
@@ -95,12 +96,34 @@ class Database:
         await self._conn.execute("CREATE INDEX IF NOT EXISTS idx_profiles_tgid ON vpn_profiles(telegram_id)")
 
         await self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS secret_keys (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                telegram_id INTEGER NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
+                key_value TEXT NOT NULL UNIQUE,
+                used INTEGER NOT NULL DEFAULT 0,
+                revoked INTEGER NOT NULL DEFAULT 0,
+                can_create INTEGER NOT NULL DEFAULT 1,
+                used_at TEXT,
+                created_at TEXT DEFAULT (datetime('now', 'localtime'))
+            )
+        """)
+
+        await self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS short_links (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                profile_id INTEGER NOT NULL REFERENCES vpn_profiles(id) ON DELETE CASCADE,
+                slug TEXT NOT NULL UNIQUE,
+                created_at TEXT DEFAULT (datetime('now', 'localtime'))
+            )
+        """)
+
+        await self._conn.execute("""
             CREATE TABLE IF NOT EXISTS payments (
                 payment_id TEXT PRIMARY KEY,
-                telegram_id BIGINT,
-                amount INTEGER,
-                duration_days INTEGER,
-                status TEXT,
+                telegram_id BIGINT NOT NULL,
+                amount INTEGER NOT NULL,
+                duration_days INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -120,6 +143,7 @@ class Database:
         await self._add_column_if_missing("users", "web_login", "TEXT UNIQUE")
         await self._add_column_if_missing("users", "web_password_hash", "TEXT")
         await self._add_column_if_missing("vpn_profiles", "disabled", "INTEGER NOT NULL DEFAULT 0")
+        await self._add_column_if_missing("vpn_profiles", "via_key", "INTEGER NOT NULL DEFAULT 0")
         await self._add_column_if_missing("vpn_profiles", "last_ip", "TEXT")
         await self._add_column_if_missing("vpn_profiles", "raw_response", "TEXT")
         await self._add_column_if_missing("vpn_profiles", "server_id", "TEXT DEFAULT NULL")
@@ -254,7 +278,7 @@ class Database:
             row = await cur.fetchone()
             return row[0] if row else 0
 
-    async def can_create_profile(self, telegram_id: int, max_profiles: int) -> bool:
+    async def can_create_profile(self, telegram_id: int, max_profiles: int = MAX_PROFILES_PER_USER) -> bool:
         return await self.count_profiles(telegram_id) < max_profiles
 
     async def can_create_key_profile(self, telegram_id: int, max_key_profiles: int) -> bool:
@@ -354,7 +378,18 @@ class Database:
         }
 
 
+    async def create_payment(self, telegram_id: int, payment_id: str, status: str, amount: int) -> None:
+        await self.ensure_user(telegram_id)
+        from config import settings
+        duration_days = int(settings.TARIFF_GRID.get(amount, {}).get("days", 0))
+        await self._conn.execute(
+            "INSERT OR REPLACE INTO payments (payment_id, telegram_id, amount, duration_days, status) VALUES (?, ?, ?, ?, ?)",
+            (payment_id, telegram_id, amount, duration_days, status),
+        )
+        await self._conn.commit()
+
     async def set_user_premium(self, telegram_id: int, duration_days: int) -> None:
+        await self.ensure_user(telegram_id)
         import time
         current_timestamp = int(time.time())
         
@@ -389,9 +424,9 @@ class Database:
         if not row:
             return {"is_premium": False, "subscription_ends_at": None, "days_remaining": 0}
             
-        is_premium = bool(row["is_premium"])
-        end_time = row["subscription_expires_at"]
-        
+        end_time = int(row["subscription_expires_at"] or 0)
+        is_premium = bool(row["is_premium"]) and end_time > current_timestamp
+
         if not is_premium or not end_time:
             days_remaining = 0
         else:
@@ -401,6 +436,7 @@ class Database:
         return {
             "is_premium": is_premium,
             "subscription_ends_at": end_time,
+            "expiry_timestamp": end_time,
             "days_remaining": days_remaining
         }
 
@@ -490,7 +526,7 @@ class Database:
             new_end_time = current_timestamp + days * 24 * 3600
 
         await self._conn.execute(
-            "UPDATE users SET subscription_expires_at=? WHERE telegram_id=?",
+            "UPDATE users SET is_premium=1, subscription_expires_at=? WHERE telegram_id=?",
             (new_end_time, row["telegram_id"])
         )
         await self._conn.commit()
