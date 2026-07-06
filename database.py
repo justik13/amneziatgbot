@@ -69,7 +69,9 @@ class Database:
                 banned      INTEGER NOT NULL DEFAULT 0,
                 key_blocked INTEGER NOT NULL DEFAULT 0,
                 is_premium  BOOLEAN DEFAULT 0,
-                subscription_ends_at INTEGER DEFAULT NULL,
+                subscription_expires_at TIMESTAMP DEFAULT NULL,
+                web_login TEXT UNIQUE,
+                web_password_hash TEXT,
                 created_at  TEXT DEFAULT (datetime('now', 'localtime'))
             )
         """)
@@ -83,37 +85,22 @@ class Database:
                 raw_response TEXT,
                 last_ip      TEXT,
                 disabled     INTEGER NOT NULL DEFAULT 0,
-                via_key      INTEGER NOT NULL DEFAULT 0,
+                server_id    TEXT DEFAULT NULL,
                 created_at   TEXT DEFAULT (datetime('now', 'localtime'))
             )
         """)
         await self._conn.execute("CREATE INDEX IF NOT EXISTS idx_profiles_tgid ON vpn_profiles(telegram_id)")
 
         await self._conn.execute("""
-            CREATE TABLE IF NOT EXISTS secret_keys (
-                id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                telegram_id  INTEGER NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
-                key_value    TEXT    NOT NULL UNIQUE,
-                used         INTEGER NOT NULL DEFAULT 0,
-                revoked      INTEGER NOT NULL DEFAULT 0,
-                can_create   INTEGER NOT NULL DEFAULT 1,
-                created_at   TEXT DEFAULT (datetime('now', 'localtime')),
-                used_at      TEXT
+            CREATE TABLE IF NOT EXISTS payments (
+                payment_id TEXT PRIMARY KEY,
+                telegram_id BIGINT,
+                amount INTEGER,
+                duration_days INTEGER,
+                status TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        await self._conn.execute("CREATE INDEX IF NOT EXISTS idx_secret_keys_tgid ON secret_keys(telegram_id)")
-        await self._conn.execute("CREATE INDEX IF NOT EXISTS idx_secret_keys_value ON secret_keys(key_value)")
-
-        await self._conn.execute("""
-            CREATE TABLE IF NOT EXISTS short_links (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                profile_id  INTEGER NOT NULL REFERENCES vpn_profiles(id) ON DELETE CASCADE,
-                slug        TEXT    NOT NULL UNIQUE,
-                created_at  TEXT DEFAULT (datetime('now', 'localtime'))
-            )
-        """)
-        await self._conn.execute("CREATE INDEX IF NOT EXISTS idx_short_links_slug ON short_links(slug)")
-        await self._conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_short_links_profile ON short_links(profile_id)")
 
         await self._conn.commit()
 
@@ -126,16 +113,13 @@ class Database:
     async def _auto_migrate_schema(self):
         await self._add_column_if_missing("users", "key_blocked", "INTEGER NOT NULL DEFAULT 0")
         await self._add_column_if_missing("users", "is_premium", "BOOLEAN DEFAULT 0")
-        await self._add_column_if_missing("users", "subscription_ends_at", "INTEGER DEFAULT NULL")
+        await self._add_column_if_missing("users", "subscription_expires_at", "TIMESTAMP DEFAULT NULL")
+        await self._add_column_if_missing("users", "web_login", "TEXT UNIQUE")
+        await self._add_column_if_missing("users", "web_password_hash", "TEXT")
         await self._add_column_if_missing("vpn_profiles", "disabled", "INTEGER NOT NULL DEFAULT 0")
         await self._add_column_if_missing("vpn_profiles", "last_ip", "TEXT")
         await self._add_column_if_missing("vpn_profiles", "raw_response", "TEXT")
-        await self._add_column_if_missing("vpn_profiles", "via_key", "INTEGER NOT NULL DEFAULT 0")
-
-        if await self._table_exists("secret_keys"):
-            await self._add_column_if_missing("secret_keys", "used_at", "TEXT")
-            await self._add_column_if_missing("secret_keys", "revoked", "INTEGER NOT NULL DEFAULT 0")
-            await self._add_column_if_missing("secret_keys", "can_create", "INTEGER NOT NULL DEFAULT 1")
+        await self._add_column_if_missing("vpn_profiles", "server_id", "TEXT DEFAULT NULL")
 
     async def _migrate_from_old_schema(self):
         if not await self._table_exists("vpn_users"):
@@ -362,63 +346,11 @@ class Database:
             "banned": bool(row["banned"]),
             "created_at": row["created_at"],
             "profiles": profiles,
+            "subscription_expires_at": row["subscription_expires_at"],
+            "web_login": row["web_login"],
+            "web_password_hash": row["web_password_hash"]
         }
 
-    async def create_secret_key(self, telegram_id: int, key_value: str) -> int:
-        await self.ensure_user(telegram_id)
-        await self._conn.execute("DELETE FROM secret_keys WHERE telegram_id=?", (telegram_id,))
-        cur = await self._conn.execute(
-            "INSERT INTO secret_keys (telegram_id, key_value) VALUES (?, ?)",
-            (telegram_id, key_value),
-        )
-        await self._conn.commit()
-        return cur.lastrowid
-
-    async def get_secret_key_by_value(self, key_value: str) -> Optional[dict]:
-        async with self._conn.execute("SELECT * FROM secret_keys WHERE key_value=?", (key_value,)) as cur:
-            row = await cur.fetchone()
-            return dict(row) if row else None
-
-    async def get_secret_key_by_user(self, telegram_id: int) -> Optional[dict]:
-        async with self._conn.execute("SELECT * FROM secret_keys WHERE telegram_id=?", (telegram_id,)) as cur:
-            row = await cur.fetchone()
-            return dict(row) if row else None
-
-    async def revoke_secret_key(self, key_id: int) -> bool:
-        cur = await self._conn.execute("UPDATE secret_keys SET revoked=1 WHERE id=?", (key_id,))
-        await self._conn.commit()
-        return cur.rowcount > 0
-
-    async def revoke_secret_key_by_user(self, telegram_id: int) -> bool:
-        cur = await self._conn.execute("DELETE FROM secret_keys WHERE telegram_id=?", (telegram_id,))
-        await self._conn.commit()
-        return cur.rowcount > 0
-
-    async def set_key_used(self, key_id: int) -> None:
-        await self._conn.execute(
-            "UPDATE secret_keys SET used=1, used_at=datetime('now','localtime') WHERE id=?",
-            (key_id,),
-        )
-        await self._conn.commit()
-
-    async def get_all_secret_keys(self) -> list[dict]:
-        async with self._conn.execute("SELECT * FROM secret_keys ORDER BY created_at DESC") as cur:
-            return [dict(r) for r in await cur.fetchall()]
-
-    async def set_user_can_create_key(self, telegram_id: int, allowed: bool) -> None:
-        await self.ensure_user(telegram_id)
-        await self._conn.execute(
-            "UPDATE users SET key_blocked=? WHERE telegram_id=?",
-            (0 if allowed else 1, telegram_id),
-        )
-        await self._conn.commit()
-
-    async def get_user_key_blocked(self, telegram_id: int) -> bool:
-        async with self._conn.execute("SELECT key_blocked FROM users WHERE telegram_id=?", (telegram_id,)) as cur:
-            row = await cur.fetchone()
-            if not row: return False
-            keys = row.keys() if hasattr(row, "keys") else []
-            return bool(row["key_blocked"]) if "key_blocked" in keys else False
 
     async def set_user_premium(self, telegram_id: int, duration_days: int) -> None:
         import time
@@ -426,10 +358,10 @@ class Database:
         
         # Получаем текущее время окончания подписки
         async with self._conn.execute(
-            "SELECT subscription_ends_at FROM users WHERE telegram_id=?", (telegram_id,)
+            "SELECT subscription_expires_at FROM users WHERE telegram_id=?", (telegram_id,)
         ) as cur:
             row = await cur.fetchone()
-            old_end_time = row["subscription_ends_at"] if row else None
+            old_end_time = row["subscription_expires_at"] if row else None
         
         # Если у пользователя уже есть активная подписка, добавляем к ней новые дни
         if old_end_time and old_end_time > current_timestamp:
@@ -438,7 +370,7 @@ class Database:
             new_end_time = current_timestamp + duration_days * 24 * 3600
             
         await self._conn.execute(
-            "UPDATE users SET is_premium=1, subscription_ends_at=? WHERE telegram_id=?",
+            "UPDATE users SET is_premium=1, subscription_expires_at=? WHERE telegram_id=?",
             (new_end_time, telegram_id)
         )
         await self._conn.commit()
@@ -448,7 +380,7 @@ class Database:
         current_timestamp = int(time.time())
         
         async with self._conn.execute(
-            "SELECT is_premium, subscription_ends_at FROM users WHERE telegram_id=?", (telegram_id,)
+            "SELECT is_premium, subscription_expires_at FROM users WHERE telegram_id=?", (telegram_id,)
         ) as cur:
             row = await cur.fetchone()
             
@@ -456,7 +388,7 @@ class Database:
             return {"is_premium": False, "subscription_ends_at": None, "days_remaining": 0}
             
         is_premium = bool(row["is_premium"])
-        end_time = row["subscription_ends_at"]
+        end_time = row["subscription_expires_at"]
         
         if not is_premium or not end_time:
             days_remaining = 0
@@ -475,7 +407,7 @@ class Database:
         current_timestamp = int(time.time())
         
         async with self._conn.execute(
-            "SELECT telegram_id FROM users WHERE is_premium=1 AND subscription_ends_at < ?",
+            "SELECT telegram_id FROM users WHERE is_premium=1 AND subscription_expires_at < ?",
             (current_timestamp,)
         ) as cur:
             rows = await cur.fetchall()
