@@ -204,7 +204,6 @@ class Database:
         d["raw_response"] = self._decrypt(d.get("raw_response"))
         d["last_ip"] = self._decrypt(d.get("last_ip"))
         d["disabled"] = bool(d.get("disabled", 0))
-        d["via_key"] = bool(d.get("via_key", 0))
         return d
 
     async def ensure_user(self, telegram_id: int) -> None:
