@@ -301,11 +301,11 @@ def check_scanner(app, home_url: str = "/"):
     def _not_found(_e):
         ip = _get_ip()
         if ip in _WHITELIST_IPS:
-            return redirect(_HOME_URL, code=301)
+            return redirect(_HOME_URL, code=302)
         if _is_404_flood(ip):
             _block_ip(ip, "404_flood")
             abort(403)
-        return redirect(_HOME_URL, code=301)
+        return redirect(_HOME_URL, code=302)
 
     @app.errorhandler(429)
     def _too_many(_e):
@@ -314,3 +314,4 @@ def check_scanner(app, home_url: str = "/"):
     @app.errorhandler(403)
     def _forbidden(_e):
         return "", 403
+

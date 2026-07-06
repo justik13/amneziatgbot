@@ -1244,7 +1244,7 @@ const authH = () => {
 };
 
 async function api(path, opts = {}) {
-  const r = await fetch(path, { ...opts, headers: { ...authH(), ...(opts.headers || {}) } });
+  let url = path; if (!opts.method || opts.method.toUpperCase() === "GET") { url += (url.includes("?") ? "&" : "?") + "_=" + Date.now(); }; const r = await fetch(url, { ...opts, headers: { ...authH(), ...(opts.headers || {}) } });
   if (r.status === 429) throw new Error('Слишком много запросов — подождите немного.');
   if (!r.ok) {
     const e = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
@@ -1731,3 +1731,4 @@ if __name__ == "__main__":
     debug = getattr(settings, "MINIAPP_DEV_MODE", False)
     logger.info("Mini App запущен на http://%s:%s", host, port)
     app.run(host=host, port=port, debug=debug, threaded=True)
+
