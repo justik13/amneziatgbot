@@ -2,6 +2,9 @@ import aiosqlite
 import logging
 from typing import Optional
 from cryptography.fernet import Fernet, InvalidToken
+import hashlib
+import secrets
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -447,3 +450,88 @@ class Database:
         async with self._conn.execute("SELECT slug FROM short_links WHERE profile_id=?", (profile_id,)) as cur:
             row = await cur.fetchone()
             return row["slug"] if row else None
+
+    def hash_password(password: str) -> str:
+        salt = secrets.token_hex(16)
+        pwdhash = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000).hex()
+        return f"{salt}${pwdhash}"
+
+    def verify_password(stored_password_hash: str, provided_password: str) -> bool:
+        salt, pwdhash = stored_password_hash.split('$')
+        return pwdhash == hashlib.pbkdf2_hmac('sha256', provided_password.encode(), salt.encode(), 100000).hex()
+
+    async def confirm_platega_payment(self, payment_id: str):
+        async with self._conn.execute("SELECT * FROM payments WHERE payment_id=?", (payment_id,)) as cur:
+            row = await cur.fetchone()
+            if not row or row["status"] == 'CONFIRMED':
+                return None
+
+        await self._conn.execute(
+            "UPDATE payments SET status='CONFIRMED' WHERE payment_id=?",
+            (payment_id,)
+        )
+        await self._conn.commit()
+
+        from config import settings
+        tariff_grid = settings.TARIFF_GRID
+        amount = row["amount"]
+        days = next((t['days'] for t in tariff_grid if t['amount'] == amount), 0)
+
+        current_timestamp = int(time.time())
+        async with self._conn.execute(
+            "SELECT subscription_expires_at FROM users WHERE telegram_id=?", (row["telegram_id"],)
+        ) as cur:
+            user_row = await cur.fetchone()
+            old_end_time = user_row["subscription_expires_at"] if user_row else None
+
+        if old_end_time and old_end_time > current_timestamp:
+            new_end_time = old_end_time + days * 24 * 3600
+        else:
+            new_end_time = current_timestamp + days * 24 * 3600
+
+        await self._conn.execute(
+            "UPDATE users SET subscription_expires_at=? WHERE telegram_id=?",
+            (new_end_time, row["telegram_id"])
+        )
+        await self._conn.commit()
+
+        async with self._conn.execute("SELECT web_login FROM users WHERE telegram_id=?", (row["telegram_id"],)) as cur:
+            user_row = await cur.fetchone()
+            if not user_row or not user_row["web_login"]:
+                generated_login = f"tunnel_{secrets.token_hex(4)}"
+                generated_password = secrets.token_urlsafe(10)
+                pwdhash = self.hash_password(generated_password)
+
+                await self._conn.execute(
+                    "UPDATE users SET web_login=?, web_password_hash=? WHERE telegram_id=?",
+                    (generated_login, pwdhash, row["telegram_id"])
+                )
+                await self._conn.commit()
+
+                return {
+                    "telegram_id": row["telegram_id"],
+                    "generated_login": generated_login,
+                    "generated_password": generated_password
+                }
+
+        return None
+
+    async def authenticate_web_user(self, login: str, password: str):
+        async with self._conn.execute("SELECT * FROM users WHERE web_login=?", (login,)) as cur:
+            row = await cur.fetchone()
+            if not row or not self.verify_password(row["web_password_hash"], password):
+                return None
+
+            current_timestamp = int(time.time())
+            subscription_expires_at = row["subscription_expires_at"]
+            if subscription_expires_at and subscription_expires_at > current_timestamp:
+                return {
+                    "telegram_id": row["telegram_id"],
+                    "banned": bool(row["banned"]),
+                    "created_at": row["created_at"],
+                    "profiles": await self.get_profiles(row["telegram_id"]),
+                    "subscription_expires_at": subscription_expires_at,
+                    "web_login": login
+                }
+
+        return None
