@@ -650,13 +650,21 @@ async def cb_my_info_profile(callback: CallbackQuery, db: Database, amnezia: Amn
         [InlineKeyboardButton(text="🔙 В главное меню", callback_data="back_main")],
     ])
 
+    web_login = user_data.get("web_login", "")
+    login_info = (
+        f"Личный кабинет туннеля (резервный вход): Логин: {html.escape(web_login)}"
+        if web_login else
+        "Будет доступно после первой оплаты"
+    )
+
     await safe_edit(
         callback.message,
         f"👤 <b>Профиль: {html.escape(vpn_name)}</b>\n\n"
         f"Статус: {acct_status}\n"
         f"Создан: {created_at}\n"
         f"{ip_line}"
-        f"Key ID: <code>{html.escape(peer_id)}</code>"
+        f"Key ID: <code>{html.escape(peer_id)}</code>\n"
+        f"{login_info}"
         f"{conn_block}",
         reply_markup=kb,
     )
@@ -733,11 +741,13 @@ async def cb_user_del_profile_do(callback: CallbackQuery, db: Database,
 
 
 def kb_tariff_selection():
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"Дней: {days} - Цена: {price} руб", callback_data=f"buy_tariff:{amount}")]
-        for days, price, amount in settings.TARIFF_GRID
-    ])
-    return kb
+    inline_keyboard = []
+    if hasattr(settings, "TARIFF_GRID") and isinstance(settings.TARIFF_GRID, dict):
+        for amount, info in settings.TARIFF_GRID.items():
+            days = info.get("days", 0)
+            text = f"Свободный интернет: {days} дней — {amount} руб"
+            inline_keyboard.append([InlineKeyboardButton(text=text, callback_data=f"buy_tariff:{amount}")])
+    return InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
 
 async def cb_buy_subscription(callback: CallbackQuery, state: FSMContext):
     await safe_edit(
@@ -832,6 +842,7 @@ async def main():
     dp.callback_query.register(cb_user_del_profile_do, F.data.startswith("user_del_profile_do:"))
     dp.callback_query.register(cb_buy_subscription,   F.data == "buy_subscription")
     dp.callback_query.register(cb_buy_tariff,         F.data.startswith("buy_tariff:"))
+    dp.callback_query.register(cb_server_status,       F.data == "server_status")
 
     async def on_startup():
         await set_bot_commands(bot)
