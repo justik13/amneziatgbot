@@ -789,46 +789,13 @@ LOGIN_HTML = """
     <button class="btn-primary" type="submit">Войти</button>
   </form>
 </div>
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
-<script>
-  if (window.Telegram && window.Telegram.WebApp) {
-    const initData = window.Telegram.WebApp.initData;
-    if (initData) {
-      fetch('/web/tg-auth', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ initData })
-      })
-      .then(response => response.json())
-      .then(data => {
-        if (data.success) {
-          window.location.href = '/web/download-config';
-        } else {
-          alert('Ошибка авторизации');
-        }
-      });
-    } else {
-      window.location.href = '/web/login';
-    }
-  }
-</script>
 </body>
 </html>
 """
 
 @web_app.route("/")
 def web_index():
-    init_data = request.headers.get("X-Telegram-Init-Data")
-    if init_data:
-        # Здесь можно добавить проверку и обработку initData
-        return "WebApp initialization data received"
-    
-    if request.headers.get("User-Agent", "").lower().find("curl") != -1:
-        return jsonify({"message": "Этот эндпоинт предназначен для браузеров."}), 403
-
-    return redirect("/web/login")
+    return render_template_string(INDEX_HTML)
 
 @web_app.route("/web/login")
 def web_login_page_get():
