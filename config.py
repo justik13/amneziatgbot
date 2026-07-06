@@ -25,12 +25,23 @@ class Settings(BaseSettings):
     WEB_HOST: str = "0.0.0.0"
     WEB_PORT: int = 5001
 
-    SHORT_LINK_DOMAIN: str = "dqpq.ru"
+    SHORT_LINK_DOMAIN: str = os.getenv("SHORT_LINK_DOMAIN", "dqpq.ru")
+    WEB_PANEL_URL: str = os.getenv("WEB_PANEL_URL", "")
 
     MAX_PROFILES_PER_USER: int = 3
     MAX_KEY_PROFILES_PER_USER: int = 3
 
     MTPROTO_LINKS: str = ""
+
+    PLATEGA_MERCHANT_ID: str
+    PLATEGA_SECRET: str
+    PLATEGA_API_KEY: str
+
+    TARIFF_GRID = {
+        25: {"days": 7, "max_devices": 1},
+        90: {"days": 30, "max_devices": 3},
+        250: {"days": 90, "max_devices": 5}
+    }
 
     @field_validator("ADMIN_IDS", mode="before")
     @classmethod
