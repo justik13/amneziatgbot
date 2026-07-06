@@ -716,6 +716,42 @@ from flask import request, jsonify, render_template_string, redirect
 import json
 
 @web_app.route("/")
+LOGIN_HTML = """
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Вход</title>
+<style>
+/* Здесь можно добавить стили для формы входа */
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="header">
+    <h1>Войти</h1>
+  </div>
+
+  <div class="card">
+    <form method="POST" action="/web/login">
+      <div class="field">
+        <label class="label">Логин</label>
+        <input class="input" type="text" name="login" required>
+      </div>
+      <div class="field">
+        <label class="label">Пароль</label>
+        <input class="input" type="password" name="password" required>
+      </div>
+      <button class="btn btn-primary" type="submit">Войти</button>
+    </form>
+  </div>
+</div>
+</body>
+</html>
+"""
+
+@web_app.route("/")
 def web_index():
     init_data = request.headers.get("X-Telegram-Init-Data")
     if init_data:
@@ -726,6 +762,10 @@ def web_index():
         return jsonify({"message": "Этот эндпоинт предназначен для браузеров."}), 403
 
     return redirect("/web/login")
+
+@web_app.route("/web/login")
+def web_login_page_get():
+    return render_template_string(LOGIN_HTML)
 
 @web_app.route("/web/login")
 def login():
@@ -937,16 +977,16 @@ def platega_callback():
 
     return jsonify({"status": "success"}), 200
 
-from flask import session
+# Этот блок уже включен выше, поэтому его не нужно добавлять снова.
 
 @web_app.route("/web/login", methods=["POST"])
-def login():
+def web_login_page_post():
     login = request.form.get("login")
     password = request.form.get("password")
 
     user = asyncio.run(get_db().authenticate_web_user(login, password))
     if not user:
-        return render_template_string(web_index(), error="Неверный логин или пароль"), 401
+        return render_template_string(LOGIN_HTML, error="Неверный логин или пароль"), 401
 
     session["user_id"] = user["telegram_id"]
     return redirect("/web/download-config")
