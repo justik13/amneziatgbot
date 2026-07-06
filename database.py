@@ -377,6 +377,11 @@ class Database:
             "web_password_hash": row["web_password_hash"]
         }
 
+    async def get_user_key_blocked(self, telegram_id: int) -> bool:
+        async with self._conn.execute("SELECT key_blocked FROM users WHERE telegram_id=?", (telegram_id,)) as cur:
+            row = await cur.fetchone()
+            return bool(row["key_blocked"]) if row else False
+
 
     async def create_payment(self, telegram_id: int, payment_id: str, status: str, amount: int) -> None:
         await self.ensure_user(telegram_id)
