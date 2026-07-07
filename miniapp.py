@@ -1725,6 +1725,34 @@ def internal_error(e):
     return jsonify({"error": "Internal Server Error"}), 500
 
 
+
+@app.route("/c/<slug>", methods=["GET"])
+def short_link_redirect(slug: str):
+    db = get_db()
+    link = run_async(db.get_short_link_by_slug(slug))
+    if not link:
+        return "Ссылка не найдена или устарела", 404
+    
+    profile = run_async(db.get_profile_by_id(link["profile_id"]))
+    if not profile or profile.get("disabled"):
+        return "Профиль недоступен", 403
+        
+    config_str = None
+    raw = profile.get("raw_response")
+    if raw:
+        try:
+            config_str = json.loads(raw).get("client", {}).get("config")
+        except Exception:
+            pass
+    if not config_str:
+        amnezia = get_amnezia()
+        config_str = run_async(amnezia.get_client_config(profile.get("peer_id") or profile["vpn_name"]))
+        
+    if not config_str:
+        return "Конфиг недоступен", 404
+        
+    return config_str, 200, {"Content-Type": "text/plain; charset=utf-8"}
+
 if __name__ == "__main__":
     host  = getattr(settings, "MINIAPP_HOST", "0.0.0.0")
     port  = getattr(settings, "MINIAPP_PORT", 5000)
