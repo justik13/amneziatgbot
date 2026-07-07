@@ -190,6 +190,8 @@ async def _build_main_menu(uid: int, db: Database) -> tuple[str, Any]:
 
 
 async def cmd_start(message: Message, state: FSMContext, db: Database):
+    if not settings.WEB_APP_URL.startswith('https://'):
+        settings.WEB_APP_URL = f'https://{settings.WEB_APP_URL}'
     uid = message.from_user.id if message.from_user else None
     if uid is None:
         return
