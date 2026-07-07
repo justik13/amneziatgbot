@@ -190,10 +190,10 @@ async def _build_main_menu(uid: int, db: Database) -> tuple[str, Any]:
 
 
 async def cmd_start(message: Message, state: FSMContext, db: Database):
-    url = url
+    url = settings.MINIAPP_URL
     if not url.startswith("https://"):
         url = f"https://{url}"
-        uid = message.from_user.id if message.from_user else None
+    uid = message.from_user.id if message.from_user else None
     if uid is None:
         return
 
